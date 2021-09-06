@@ -31,7 +31,6 @@ module.exports = class SettingsCommand extends Command {
     //Emoji
     let joinVotingEmoji = message.client.utils.getEmojiForJoinVoting(message.guild, message.client) || '`None`';
 
-    const confessionChannel = message.guild.channels.cache.get(row.confessions_channel_id) || '`None`';
     const starboardChannel = message.guild.channels.cache.get(row.starboard_channel_id) || '`None`';
     const modLog = message.guild.channels.cache.get(row.mod_log_id) || '`None`';
     const memberLog = message.guild.channels.cache.get(row.member_log_id) || '`None`';
@@ -79,7 +78,6 @@ module.exports = class SettingsCommand extends Command {
     const farewellStatus = `\`${message.client.utils.getStatus(row.farewell_message && row.farewell_channel_id)}\``;
     const pointsStatus = `\`${message.client.utils.getStatus(row.point_tracking)}\``;
     const crownStatus = `\`${message.client.utils.getStatus(row.crown_role_id && row.crown_schedule)}\``;
-    const anonymous = `\`${message.client.utils.getStatus(row.anonymous)}\``;
     const joinVotingStatus = `\`${message.client.utils.getStatus(row.joinvoting_message_id && row.voting_channel_id && row.joinvoting_emoji)}\``;
 
     // Trim messages to 1024 characters
@@ -113,8 +111,6 @@ module.exports = class SettingsCommand extends Command {
           .addField('Auto Role', autoRole, true)
           .addField('Auto Kick', autoKick, true)
           .addField('Random Color', randomColor, true)
-            .addField('Anonymous Messages', anonymous, true)
-            .addField('Confessions Channel', confessionChannel, true)
           .addField('Mod Channels', modChannels)
           .addField('Disabled Commands', disabledCommands)
         );

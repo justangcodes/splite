@@ -83,12 +83,6 @@ module.exports = class HelpCommand extends Command {
                 }
             });
 
-            commands[`Slash Commands`] = []
-            commands[`Slash Commands`].push(`\`/anonymous\` Post anonymous message. **Cost: 50 points**\
-      \n\`/confess\` Post a confession in confessions channel.\
-      \n\`/report\` Report a confession.\
-      \n${message.member.hasPermission('MANAGE_GUILD') ? `\`/view\` View details of a confession.` : ' '}`)
-
             for (const property in commands) {
                 if (commands[property].length){
 
@@ -150,10 +144,7 @@ module.exports = class HelpCommand extends Command {
                     .setTimestamp()
                     .setThumbnail('https://i.imgur.com/B0XSinY.png')
                     .setColor("RANDOM")
-                if (type === `Slash Commands`)
-                    tempEmbed.addField(`${emojis.verified_developer} **/${type}**`, commands[type])
-                else
-                    tempEmbed.addField(`**${emojiMap[type]} [${commands[type].length}]**`, `${emojiMap[type].includes('Admin') ? 'Commands can be cleared by replacing "set" with "clear".\ni.e `setmodlog` ➔ `clearmodlog`\n-----------------------------------------------------\n' : ''} ${commands[type].join(', ')}`);
+                tempEmbed.addField(`**${emojiMap[type]} [${commands[type].length}]**`, `${emojiMap[type].includes('Admin') ? 'Commands can be cleared by replacing "set" with "clear".\ni.e `setmodlog` ➔ `clearmodlog`\n-----------------------------------------------------\n' : ''} ${commands[type].join(', ')}`);
 
                 buttons = buttons.map(row => {
                     row.forEach(button =>{

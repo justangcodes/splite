@@ -28,7 +28,7 @@ module.exports = class ExplainPointsCommand extends Command {
       stripIndent`You can earn points (${emojis.point}) in the following ways: by sending **messages**, by using **commands**,` +
       ` by playing geoGuessr (To play, type **\`${prefix}geoguessr\`**)and by spending time in **voice chat** ${emojis.voice}.`;
     if (!disabledCommands.includes('givepoints')) earningPoints += 
-      ` And if someone's feeling generous, they can give you points ${emojis.point} by using the \`${prefix}give\` command.\nAdditionally, points can be used to send anonymous messages (Type **\`/anonymous\`**) in a server if allowed by admins.`;
+      ` And if someone's feeling generous, they can give you points ${emojis.point} by using the \`${prefix}give\` command.`;
     
     const pointsPer = stripIndent`
       Message Points :: ${messagePoints} points ${emojis.point} per message

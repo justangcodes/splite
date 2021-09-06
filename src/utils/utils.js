@@ -1,10 +1,6 @@
 const { MessageEmbed } = require('discord.js');
 const schedule = require('node-schedule');
 const { stripIndent } = require('common-tags');
-const confessions = require("../slashCommands/confessions")
-const report = require("../slashCommands/report")
-const anonymous = require("../slashCommands/anonymous")
-const view = require("../slashCommands/view")
 const Collection = require("@discordjs/collection");
 const emojis = require("./emojis.json")
 const request = require('request')
@@ -135,20 +131,6 @@ function replaceKeywords(message) {
     .replace(/\?username/g, '`?username`')
     .replace(/\?tag/g, '`?tag`')
     .replace(/\?size/g, '`?size`');
-}
-
-function registerSlashCommands(client, server){
-  confessions.createSlashConfess(client, server);
-  report.createSlashReport(client, server);
-  anonymous.createSlashAnonymous(client, server);
-  view.createSlashView(client, server);
-}
-
-function callSlashCommand(command, client, interaction){
-  if (command === 'confess') confessions.confess(interaction, client);
-  if (command === 'report') report.report(interaction, client);
-  if (command === 'anonymous') anonymous.anonymous(interaction, client);
-  if (command === 'view') view.view(interaction, client);
 }
 
 function getEmojiForJoinVoting(guild, client) {
@@ -464,8 +446,6 @@ module.exports = {
   replaceCrownKeywords,
   transferCrown,
   scheduleCrown,
-  registerSlashCommands,
-  callSlashCommand,
   getEmojiForJoinVoting,
   createCollections,
   createProgressBar,

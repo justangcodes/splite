@@ -1,4 +1,6 @@
 # SPLITE - Discord Multi-Purpose Bot
+
+**This branch does not have the slash commands**
 <div align=center>
   
   <a href="https://discord.com/api/oauth2/authorize?client_id=842244538248593439&permissions=4294438903&scope=bot%20applications.commands">
