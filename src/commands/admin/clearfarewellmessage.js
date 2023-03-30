@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 const {oneLine} = require('common-tags');
 
@@ -7,48 +7,57 @@ module.exports = class clearFarewellMessageCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'clearfarewellmessage',
-            aliases: ['clearfarewellmsg', 'clearfm', 'cfm', 'clearleavemessage', 'clearleavemsg'],
+            aliases: ['clearfarewellmsg', 'clearfm', 'cfm', 'clearleavemessage', 'clearleavemsg',],
             usage: 'clearfarewellmessage',
             description: oneLine`
         clears the message ${client.name} will say when someone leaves your server.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearfarewellmessage']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearfarewellmessage'],
         });
     }
 
-    run(message, args) {
+    run(message) {
+        this.handle(message, false);
+    }
 
-        const {farewell_channel_id: farewellChannelId, farewell_message: oldFarewellMessage} =
-            message.client.db.settings.selectFarewells.get(message.guild.id);
-        const farewellChannel = message.guild.channels.cache.get(farewellChannelId);
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const {
+            farewell_channel_id: farewellChannelId, farewell_message: oldFarewellMessage,
+        } = this.client.db.settings.selectFarewells.get(context.guild.id);
+        const farewellChannel = context.guild.channels.cache.get(farewellChannelId);
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(farewellChannelId, oldFarewellMessage);
+        const oldStatus = this.client.utils.getStatus(farewellChannelId, oldFarewellMessage);
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Farewells`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
             .setDescription(`The \`farewell message\` was successfully cleared. ${success}`)
-            .addField('Channel', farewellChannel?.toString() || '`None`', true)
+            .addFields([{name: 'Channel', value: farewellChannel?.toString() || '`None`', inline: true}])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Update status
-        message.client.db.settings.updateFarewellMessage.run(null, message.guild.id);
+        this.client.db.settings.updateFarewellMessage.run(null, context.guild.id);
         const status = 'disabled';
-        const statusUpdate = (oldStatus != status) ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
+        const statusUpdate = oldStatus != status ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
 
-        return message.channel.send({
+        const payload = {
             embeds: [embed
-                .addField('Status', statusUpdate, true)
-                .addField('Message', '`None`')
-            ]
-        });
+                .addFields([{name: 'Status', value: statusUpdate, inline: true}])
+                .addFields([{name: 'Message', value: '`None`'}]),],
+        };
+
+        this.sendReply(context, payload);
     }
 };

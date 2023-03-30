@@ -1,6 +1,4 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
 
 module.exports = class frameCommand extends Command {
     constructor(client) {
@@ -10,25 +8,23 @@ module.exports = class frameCommand extends Command {
             usage: 'frame <user mention/id>',
             description: 'Generates a frame image',
             type: client.types.FUN,
-            examples: ['frame @split']
+            examples: ['frame @split'],
+            disabled: client.ameApi === null,
         });
     }
 
     async run(message, args) {
+        const member = (await this.getGuildMember(message.guild, args.join(' '))) || message.author;
+        await this.handle(member, message, false);
+    }
 
-        const member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0]) || message.author;
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || interaction.author;
+        await this.handle(member, interaction, true);
+    }
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const buffer = await msg.client.ameApi.generate("frame", {url: this.getAvatarURL(member, "png")});
-                const attachment = new MessageAttachment(buffer, "frame.png");
-
-                await message.channel.send({files: [attachment]})
-                await msg.delete()
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
-
+    async handle(targetUser, context) {
+        await this.sendAmethystEmbed(context, 'frame', {targetUser});
     }
 };

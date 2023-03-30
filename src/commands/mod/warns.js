@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {ReactionMenu} = require('../ReactionMenu.js');
-const {MessageEmbed} = require('discord.js');
+const ButtonMenu = require('../ButtonMenu.js');
+const {EmbedBuilder} = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class WarnsCommand extends Command {
     constructor(client) {
@@ -8,79 +9,109 @@ module.exports = class WarnsCommand extends Command {
             name: 'warns',
             aliases: ['warnings'],
             usage: 'warns <user mention/ID>',
-            description: 'Displays a member\'s current warnings. A max of 5 warnings can be displayed at one time.',
+            description:
+                'Displays a member\'s current warnings. A max of 5 warnings can be displayed at one time.',
             type: client.types.MOD,
-            userPermissions: ['KICK_MEMBERS'],
-            examples: ['warns @split']
+            userPermissions: ['KickMembers'],
+            examples: ['warns @split'],
+            slashCommand: new SlashCommandBuilder()
+                .addUserOption(u => u.setName('user').setRequired(true).setDescription('The user to view warnings for'))
         });
     }
 
-    run(message, args) {
-        if (!args[0]) return this.sendHelpMessage(message);
-        const member = this.getMemberFromMention(message, args[0]) || message.guild.members.cache.get(args[0]);
-        if (!member)
-            return this.sendErrorMessage(message, 0, 'Please mention a user or provide a valid user ID');
+    async run(message, args) {
+        const member =
+            await this.getGuildMember(message.guild, args.join(' ')) || message.member;
 
-        let warns = message.client.db.users.selectWarns.pluck().get(member.id, message.guild.id) || {warns: []};
-        if (typeof (warns) == 'string') warns = JSON.parse(warns);
+        await this.handle(member, message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const user = interaction.options.getUser('user') || interaction.member;
+        await this.handle(user, interaction);
+    }
+
+    async handle(member, context) {
+        let warns = this.client.db.users.selectWarns
+            .pluck()
+            .get(member.id, context.guild.id) || {warns: []};
+        if (typeof warns == 'string') warns = JSON.parse(warns);
         const count = warns.warns.length;
 
-        const embed = new MessageEmbed()
-            .setAuthor(member.user.tag, member.user.displayAvatarURL({dynamic: true}))
-            .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+        const embed = new EmbedBuilder()
+            .setAuthor({
+                name: this.getUserIdentifier(member),
+                iconURL: this.getAvatarURL(member),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setFooter({
+                text: this.getUserIdentifier(context.member),
+                iconURL: this.getAvatarURL(context.author),
+            })
+            .setTimestamp();
 
-        const buildEmbed = (current, embed) => {
-            const max = (count > current + 5) ? current + 5 : count;
+        const buildEmbed = async (current, embed) => {
+            const max = count > current + 5 ? current + 5 : count;
             let amount = 0;
             for (let i = current; i < max; i++) {
                 embed // Build warning list
-                    .addField('\u200b', `**Warn \`#${i + 1}\`**`)
-                    .addField('Reason', warns.warns[i].reason)
-                    .addField(
-                        'Moderator',
-                        message.guild.members.cache.get(warns.warns[i].mod)?.toString() || '`Unable to find moderator`',
-                        true
-                    )
-                    .addField('Date Issued', warns.warns[i].date, true);
+                    .addFields([{name: '\u200b', value: `**Warn \`#${i + 1}\`**`}])
+                    .addFields([{name: 'Reason', value: warns.warns[i].reason}])
+                    .addFields([{
+                        name: 'Moderator',
+                        value: (await context.guild.members.fetch(warns.warns[i].mod))
+                            ?.toString() || '`Unable to find moderator`',
+                        inline: true
+                    }])
+                    .addFields([{name: 'Date Issued', value: warns.warns[i].date, inline: true}]);
                 amount += 1;
             }
 
             return embed
-                .setTitle('Warn List ' + this.client.utils.getRange(warns.warns, current, 5))
-                .setDescription(`Showing \`${amount}\` of ${member}'s \`${count}\` total warns.`);
+                .setTitle(
+                    'Warn List ' +
+                    this.client.utils.getRange(warns.warns, current, 5)
+                )
+                .setDescription(
+                    `Showing \`${amount}\` of ${member}'s \`${count}\` total warns.`
+                );
         };
 
-        if (count == 0) message.channel.send({
-            embeds: [embed
-                .setTitle('Warn List [0]')
-                .setDescription(`${member} currently has no warns.`)
-            ]
-        });
-        else if (count < 5) message.channel.send({embeds: [buildEmbed(0, embed)]});
+        if (count == 0) {
+            const payload = {
+                embeds: [
+                    embed
+                        .setTitle('Warn List [0]')
+                        .setDescription(`${member} currently has no warns.`),
+                ],
+            };
+            await this.sendReply(context, payload);
+        }
+        else if (count < 5) {
+            const payload = {embeds: [await buildEmbed(0, embed)]};
+            await this.sendReply(context, payload);
+        }
         else {
-
             let n = 0;
-            const json = embed.setFooter({
-                text: 'Expires after three minutes.\n' + message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
-            }).toJSON();
+            const json = embed
+                .setFooter({
+                    text:
+                        'Expires after three minutes.\n' + context.member.displayName,
+                    iconURL: this.getAvatarURL(context.author),
+                })
+                .toJSON();
 
             const first = () => {
                 if (n === 0) return;
                 n = 0;
-                return buildEmbed(n, new MessageEmbed(json));
+                return buildEmbed(n, new EmbedBuilder(json));
             };
 
             const previous = () => {
                 if (n === 0) return;
                 n -= 5;
                 if (n < 0) n = 0;
-                return buildEmbed(n, new MessageEmbed(json));
+                return buildEmbed(n, new EmbedBuilder(json));
             };
 
             const next = () => {
@@ -88,7 +119,7 @@ module.exports = class WarnsCommand extends Command {
                 if (n === cap || n + 5 === count) return;
                 n += 5;
                 if (n >= count) n = cap;
-                return buildEmbed(n, new MessageEmbed(json));
+                return buildEmbed(n, new EmbedBuilder(json));
             };
 
             const last = () => {
@@ -96,7 +127,7 @@ module.exports = class WarnsCommand extends Command {
                 if (n === cap || n + 5 === count) return;
                 n = cap;
                 if (n === count) n -= 5;
-                return buildEmbed(n, new MessageEmbed(json));
+                return buildEmbed(n, new EmbedBuilder(json));
             };
 
             const reactions = {
@@ -107,19 +138,9 @@ module.exports = class WarnsCommand extends Command {
                 '⏹': null,
             };
 
-            const menu = new ReactionMenu(
-                message.client,
-                message.channel,
-                message.member,
-                buildEmbed(n, new MessageEmbed(json)),
-                null,
-                null,
-                null,
-                reactions
-            );
+            const menu = new ButtonMenu(this.client, context.channel, context.member, await buildEmbed(n, new EmbedBuilder(json)), null, null, reactions);
 
-            menu.reactions['⏹'] = menu.stop.bind(menu);
-
+            menu.functions['⏹'] = menu.stop.bind(menu);
         }
     }
 };

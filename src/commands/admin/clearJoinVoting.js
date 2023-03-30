@@ -1,58 +1,83 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success, verify, fail} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder} = require('discord.js');
+const {success} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearJoinVoting extends Command {
     constructor(client) {
         super(client, {
             name: 'clearjoinvoting',
             aliases: ['clearjoingate', 'clearjoinvoting', 'cjv'],
-            usage: `clearjoinvoting`,
+            usage: 'clearjoinvoting',
             description: oneLine`Disables the join voting feature`,
             type: client.types.ADMIN,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS', 'ADD_REACTIONS'],
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearjoinvoting']
+            clientPermissions: ['SendMessages', 'EmbedLinks', 'AddReactions'],
+            userPermissions: ['ManageGuild'],
+            examples: ['clearjoinvoting'],
         });
     }
 
-    async run(message, args) {
+    run(message) {
+        this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
         let {
             joinvoting_message_id: joinvotingMessageId,
             joinvoting_emoji: joinvotingEmoji,
-            voting_channel_id: votingChannelID
-        } = message.client.db.settings.selectJoinVotingMessage.get(message.guild.id);
+            voting_channel_id: votingChannelID,
+        } = this.client.db.settings.selectJoinVotingMessage.get(
+            context.guild.id
+        );
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(
+        const oldStatus = this.client.utils.getStatus(
             joinvotingMessageId && joinvotingEmoji && votingChannelID
         );
 
-        message.client.db.settings.updateJoinVotingEmoji.run(null, message.guild.id);
-        message.client.db.settings.updateJoinVotingMessageId.run(null, message.guild.id);
-        message.client.db.settings.updateVotingChannelID.run(null, message.guild.id);
+        this.client.db.settings.updateJoinVotingEmoji.run(
+            null,
+            context.guild.id
+        );
+        this.client.db.settings.updateJoinVotingMessageId.run(
+            null,
+            context.guild.id
+        );
+        this.client.db.settings.updateVotingChannelID.run(
+            null,
+            context.guild.id
+        );
 
         // Update status
         const status = 'disabled';
-        const statusUpdate = (oldStatus != status) ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
+        const statusUpdate =
+            oldStatus != status
+                ? `\`${oldStatus}\` ➔ \`${status}\``
+                : `\`${oldStatus}\``;
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Join Voting`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`join voting system\` has been cleared. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`join voting system\` has been cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        return message.channel.send({
-                embeds: [embed
-                    .addField('Status', statusUpdate, true)
-                    .addField('Message', '`None`')]
-            }
-        );
+        const payload = {
+            embeds: [embed
+                .addFields([{name: 'Status', value: statusUpdate, inline: true}])
+                .addFields([{name: 'Message', value: '`None`'}]),],
+        };
+
+        this.sendReply(context, payload);
     }
 };

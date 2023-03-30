@@ -1,125 +1,203 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success, verify, fail} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder, ChannelType} = require('discord.js');
+const {success, fail} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class setJoinVoting extends Command {
     constructor(client) {
         super(client, {
             name: 'setjoinvoting',
             aliases: ['joingate', 'joinvoting', 'sjv'],
-            usage: `setjoinvoting <messageID> <emoji> <votingChannel>`,
+            usage: 'setjoinvoting <messageID> <emoji> <votingChannel>',
             description: oneLine`
         Reacts to the provided message with the specified emoji\nIf someone reacts to the emoji, a vote will start in the votingChannel.\nThe person that reacted will either be banned or \nleft alone depending on how many votes they received.\n\n**Useful if you are setting an 18+ server, anyone that\n reacts to the -18 emoji will initiate a vote.**\nUse \`clearJoinVoting\` to disable`,
             type: client.types.ADMIN,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS', 'ADD_REACTIONS'],
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setjoinvoting 832878346979377193 🦶 #generalChannel', 'clearjoinvoting']
+            clientPermissions: ['SendMessages', 'EmbedLinks', 'AddReactions'],
+            userPermissions: ['ManageGuild'],
+            examples: [
+                'setjoinvoting 832878346979377193 🦶 #generalChannel',
+                'clearjoinvoting',
+            ],
         });
     }
 
-    async run(message, args) {
+    run(message, args) {
+        const messageID = args[0];
+        const emoji = args[1];
+        const channel = this.getChannelFromMention(message, args[2]) || message.guild.channels.cache.get(args[2]);
+
+        this.handle(messageID, emoji, channel, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+
+        const messageID = interaction.options.getString('messageID');
+        const emoji = interaction.options.getString('emoji');
+        const channel = interaction.options.getChannel('channel');
+
+        await this.handle(messageID, emoji, channel, interaction, true);
+    }
+
+    async handle(messageId, emoji, channel, context, isInteraction) {
         let {
             joinvoting_message_id: joinvotingMessageId,
             joinvoting_emoji: joinvotingEmoji,
-            voting_channel_id: votingChannelID
-        } = message.client.db.settings.selectJoinVotingMessage.get(message.guild.id);
+            voting_channel_id: votingChannelID,
+        } = this.client.db.settings.selectJoinVotingMessage.get(context.guild.id);
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(
-            joinvotingMessageId && joinvotingEmoji && votingChannelID
-        );
+        const oldStatus = this.client.utils.getStatus(joinvotingMessageId && joinvotingEmoji && votingChannelID);
 
-        if (!args[0]) {
-            const embed = new MessageEmbed()
+        // Show current settings
+        if (!messageId || !emoji || !channel) {
+            const embed = new EmbedBuilder()
                 .setTitle('Settings: `Join Voting`')
-                .setThumbnail(message.guild.iconURL({dynamic: true}))
+                .setThumbnail(context.guild.iconURL({dynamic: true}))
                 .setDescription(this.description)
-                .addField('Usage', `\`${this.usage}\``)
+                .addFields([{name: 'Usage', value: `\`${this.usage}\``}])
                 .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text: context.member.displayName,
+                    iconURL: this.getAvatarURL(context.author),
                 })
-                .setTimestamp()
-                .setColor(message.guild.me.displayHexColor);
+                .setTimestamp();
 
-            const emoji = await message.guild.emojis.cache.find(e => e.id === joinvotingEmoji) || joinvotingEmoji
-            return message.channel.send({
-                embeds: [embed
-                    .addField('Status', oldStatus, true)
-                    .addField('Current MessageID', `\`${joinvotingMessageId || 'None'}\``)
-                    .addField('Current Emoji', `${emoji || '`None`'}`)
-                    .addField('Current ChannelID', `${votingChannelID ? '<#' + votingChannelID + '>' : '`None`'}`)
-                ]
+            const emoji = (await context.guild.emojis.cache.find((e) => e.id === joinvotingEmoji)) || joinvotingEmoji;
+
+            const payload = ({
+                embeds: [
+                    embed
+                        .addFields([{name: 'Status', value: oldStatus, inline: true}])
+                        .addFields({
+                            name: 'Current MessageID',
+                            value: `\`${joinvotingMessageId || 'None'}\``
+                        })
+                        .addFields([{name: 'Current Emoji', value: `${emoji || '`None`'}`}])
+                        .addFields({
+                            name: 'Current ChannelID',
+                            value: `${
+                                votingChannelID
+                                    ? '<#' + votingChannelID + '>'
+                                    : '`None`'
+                            }`
+                        }),
+                ],
             });
-        } else if (args.length > 2) {
-            let emoji, emojiValue = null, joinVotingMessage;
+
+            this.sendReply(context, payload);
+        }
+        else {
+            let parsedEmoji,
+                emojiValue = null,
+                joinVotingMessage;
 
             //messageID
-            if ((/^[0-9]{18}$/g).test(args[0])) {
+            if (/^[0-9]{18}$/g.test(messageId)) {
                 try {
-                    joinVotingMessage = await message.channel.messages.fetch(args[0])
-                } catch (err) {
-                    return this.sendErrorMessage(message, 1, 'Failed to find the message', err.message);
+                    joinVotingMessage = await context.channel.messages.fetch(messageId);
                 }
-            } else {
-                return this.sendErrorMessage(message, 0, `First argument needs to be a messageID. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`);
+                catch (err) {
+                    const payload = `${fail} I could not find the message with the ID \`${messageId}\``;
+
+                    this.sendReply(context, payload);
+                    return;
+                }
+
+            }
+            else {
+                const payload = isInteraction ? `${fail} Please provide a valid messageID. A messageID is a 18 digit number that can be found by right clicking a message and selecting "Copy ID".`
+                    : `${fail} First argument needs to be a messageID. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`;
+
+                this.sendReply(context, payload);
+                return;
             }
 
-            //EmojiID
-            if ((/[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}]/gu).test(args[1])) {
-                emoji = args[1]
-                emojiValue = args[1]
-            } else if (/<a?:.+:\d+>/gm.test(args[1])) {
+            //Built-in Emojis
+            if (/[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}]/gu.test(emoji)) {
+                parsedEmoji = emoji;
+                emojiValue = emoji;
+            }
+            //Custom Emojis
+            else if (/<a?:.+:\d+>/gm.test(emoji)) {
                 try {
-                    let id = args[1].split(':')
-                    id = id.reverse()[0]
-                    id = id.replace('>', '')
-                    emoji = await message.guild.emojis.cache.find(e => e.id === id)
+                    let id = emoji.split(':');
+                    id = id.reverse()[0];
+                    id = id.replace('>', '');
+                    parsedEmoji = await context.guild.emojis.cache.find(
+                        (e) => e.id === id
+                    );
                     emojiValue = id;
-                } catch (err) {
-                    return this.sendErrorMessage(message, 1, 'Failed to find the Emoji', err.message);
                 }
-            } else {
-                return this.sendErrorMessage(message, 0, `Second argument needs to be an emoji. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`);
+                catch (err) {
+                    const payload = `${fail} I could not find the emoji with the ID \`${emoji}\``;
+
+                    this.sendReply(context, payload);
+                    return;
+                }
+            }
+            else {
+                const payload = isInteraction ? `${fail} Please provide a valid emoji.` : `${fail} Second argument needs to be an emoji. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`;
+
+                this.sendReply(context, payload);
+                return;
             }
 
             //VotingChannelID
-            if ((/<#(\d{18})>/gm).test(args[2])) {
-                try {
-                    message.guild.channels.cache.get(args[2])
-                } catch (err) {
-                    return this.sendErrorMessage(message, 0, `Failed to find the channel. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`, err.message);
-                }
-            } else {
-                return this.sendErrorMessage(message, 0, `Please specifiy a channel. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`);
+            channel = isInteraction ? channel : this.getChannelFromMention(context, channel);
+            if (!channel) {
+                const payload = isInteraction ? `${fail} Please provide a valid channel.` : `${fail} Third argument needs to be a channel. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`;
+
+                this.sendReply(context, payload);
+                return;
             }
+
+            if (!channel || (channel.type != ChannelType.GuildText && channel.type != ChannelType.GuildNews) || !channel.viewable) {
+                const payload = `${fail} The channel you provided is not a text channel.`;
+
+                this.sendReply(context, payload);
+                return;
+            }
+
+
             try {
-                await joinVotingMessage.react(emoji)
-            } catch (err) {
-                return this.sendErrorMessage(message, 0, `Failed to setup join voting. Emojis must be from this server. Example: setjoinvoting 832878346979377193 🦶 #generalChannel`, err.message);
+                await joinVotingMessage.react(parsedEmoji);
             }
-            let votingChannelID = args[2].replace('<#', '')
-            votingChannelID = votingChannelID.replace('>', '')
-            message.client.db.settings.updateJoinVotingMessageId.run(args[0], message.guild.id);
-            message.client.db.settings.updateJoinVotingEmoji.run(emojiValue, message.guild.id);
-            message.client.db.settings.updateVotingChannelID.run(votingChannelID, message.guild.id);
+            catch (err) {
+                const payload = `${fail} I could not react to the message with the ID \`${messageId}\``;
 
-            const embed = new MessageEmbed()
+                this.sendReply(context, payload);
+                return;
+            }
+
+            this.client.db.settings.updateJoinVotingMessageId.run(
+                messageId,
+                context.guild.id
+            );
+            this.client.db.settings.updateJoinVotingEmoji.run(
+                emojiValue,
+                context.guild.id
+            );
+            this.client.db.settings.updateVotingChannelID.run(
+                channel.id,
+                context.guild.id
+            );
+
+            const embed = new EmbedBuilder()
                 .setTitle('Settings: `Join Voting`')
-                .setThumbnail(message.guild.iconURL({dynamic: true}))
-                .setDescription(`The \`join voting system\` was successfully updated. ${success}\nUse \`clearJoinVoting\` to disable`)
-                .addField('Status', "\`enabled\`", true)
-                .addField('message ID', `\`${args[0]}\``)
-                .addField('Voting Channel', `${args[2]}`)
+                .setThumbnail(context.guild.iconURL({dynamic: true}))
+                .setDescription(
+                    `The \`join voting system\` was successfully updated. ${success}\nUse \`clearJoinVoting\` to disable. If someone reacts with the ${parsedEmoji} emoji you set, the voting will start in the ${channel} channel.`
+                )
+                .addFields([{name: 'Status', value: '`enabled`', inline: true}])
+                .addFields([{name: 'message ID', value: `\`${messageId}\``}])
+                .addFields([{name: 'Voting Channel', value: `${channel}`, inline: true}])
                 .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text: context.member.displayName,
+                    iconURL: this.getAvatarURL(context.author),
                 })
-                .setTimestamp()
-                .setColor(message.guild.me.displayHexColor);
+                .setTimestamp();
 
-            await message.channel.send({embeds: [embed]});
+            this.sendReply(context, embed);
         }
     }
 };

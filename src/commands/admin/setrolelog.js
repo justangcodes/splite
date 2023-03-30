@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder, ChannelType} = require('discord.js');
+const {success, fail} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class SetRoleLogCommand extends Command {
     constructor(client) {
@@ -14,36 +14,60 @@ module.exports = class SetRoleLogCommand extends Command {
         \nUse \`clearrolelog\` to clear the current \`role log\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setrolelog #bot-log', 'clearrolelog']
+            userPermissions: ['ManageGuild'],
+            examples: ['setrolelog #bot-log', 'clearrolelog'],
         });
     }
 
     run(message, args) {
-        const roleLogId = message.client.db.settings.selectRoleLogId.pluck().get(message.guild.id);
-        const oldRoleLog = message.guild.channels.cache.get(roleLogId) || '`None`';
-        const embed = new MessageEmbed()
+        this.handle(args.join(' '), message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const channel = interaction.options.getChannel('channel');
+        this.handle(channel, interaction, true);
+    }
+
+    handle(channel, context, isInteraction) {
+        const roleLogId = this.client.db.settings.selectRoleLogId.pluck().get(context.guild.id);
+        const oldRoleLog = context.guild.channels.cache.get(roleLogId) || '`None`';
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Logging`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        // Clear if no args provided
-        if (args.length === 0) {
-            return message.channel.send({embeds: [embed.addField('Current Role Log', `${oldRoleLog}`).setDescription(this.description)]});
+        // Show current role log
+        if (!channel) {
+            return context.channel.send({
+                embeds: [
+                    embed
+                        .addFields([{name: 'Current Role Log', value: `${oldRoleLog}`}])
+                        .setDescription(this.description),
+                ],
+            });
         }
-        embed.setDescription(`The \`role log\` was successfully updated. ${success}\nUse \`clearrolelog\` to clear the current \`role log\`.`)
-        const roleLog = this.getChannelFromMention(message, args[0]) || message.guild.channels.cache.get(args[0]);
-        if (!roleLog || roleLog.type != 'GUILD_TEXT' || !roleLog.viewable)
-            return this.sendErrorMessage(message, 0, stripIndent`
-        Please mention an accessible text channel or provide a valid text channel ID
-      `);
-        message.client.db.settings.updateRoleLogId.run(roleLog.id, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Role Log', `${oldRoleLog} ➔ ${roleLog}`)]});
+
+        channel = isInteraction ? channel : this.getChannelFromMention(context, channel) || context.guild.channels.cache.get(channel);
+
+        if (!channel || channel.type != ChannelType.GuildText || !channel.viewable) {
+            const payload = `${fail} I can't find that channel.`;
+            this.sendReply(context, payload);
+            return;
+        }
+
+        this.client.db.settings.updateRoleLogId.run(channel.id, context.guild.id);
+
+        const payload = ({
+            embeds: [embed.addFields([{name: 'Role Log', value: `${oldRoleLog} ➔ ${channel}`}]).setDescription(
+                `The \`role log\` was successfully updated. ${success}\nUse \`clearrolelog\` to clear the current \`role log\`.`
+            )],
+        });
+
+        this.sendReply(context, payload);
     }
 };

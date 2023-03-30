@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 const {oneLine} = require('common-tags');
 
@@ -7,7 +7,7 @@ module.exports = class SetWelcomeMessageCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'setwelcomemessage',
-            aliases: ['setwelcomemsg', 'setwm', 'swm', 'setgreetmessage', 'setgreetmsg'],
+            aliases: ['setwelcomemsg', 'setwm', 'swm', 'setgreetmessage', 'setgreetmsg',],
             usage: 'setwelcomemessage <message>',
             description: oneLine`
         Sets the message ${client.name} will say when someone joins your server.
@@ -19,54 +19,67 @@ module.exports = class SetWelcomeMessageCommand extends Command {
         \nUse \`clearwelcomemessage\` to clear the current \`welcome message\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setwelcomemessage ?member has joined the server!', 'clearwelcomemessage']
+            userPermissions: ['ManageGuild'],
+            examples: ['setwelcomemessage ?member has joined the server!', 'clearwelcomemessage',],
         });
     }
 
     run(message, args) {
+        let text = args[0] ? message.content.slice(message.content.indexOf(args[0]), message.content.length) : '';
+        this.handle(text, message, false);
+    }
 
-        const {welcome_channel_id: welcomeChannelId, welcome_message: oldWelcomeMessage} =
-            message.client.db.settings.selectWelcomes.get(message.guild.id);
-        let welcomeChannel = message.guild.channels.cache.get(welcomeChannelId);
+    async interact(interaction) {
+        await interaction.deferReply();
+        const text = interaction.options.getString('text');
+        this.handle(text, interaction, true);
+    }
+
+    handle(text, context) {
+        const {
+            welcome_channel_id: welcomeChannelId, welcome_message: oldWelcomeMessage,
+        } = this.client.db.settings.selectWelcomes.get(context.guild.id);
+        let welcomeChannel = context.guild.channels.cache.get(welcomeChannelId);
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(welcomeChannelId, oldWelcomeMessage);
+        const oldStatus = this.client.utils.getStatus(welcomeChannelId, oldWelcomeMessage);
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Welcomes`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .addField('Channel', welcomeChannel?.toString() || '`None`', true)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .addFields([{name: 'Channel', value: welcomeChannel?.toString() || '`None`', inline: true}])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName, iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        if (!args[0]) {
-            return message.channel.send({
+        if (!text) {
+            const payload = ({
                 embeds: [embed
-                    .addField('Status', oldStatus, true)
-                    .addField('Current Welcome Message', `${oldWelcomeMessage}`).setDescription(this.description)
-                ]
+                    .addFields([{name: 'Status', value: oldStatus, inline: true}])
+                    .addFields([{name: 'Current Welcome Message', value: `${oldWelcomeMessage}`}])
+                    .setDescription(this.description),],
             });
+
+            this.sendReply(context, payload);
+            return;
         }
 
-        embed.setDescription(`The \`welcome message\` was successfully updated. ${success}\nUse \`clearwelcomemessage\` to clear the current \`welcome message\`.`)
-        let welcomeMessage = message.content.slice(message.content.indexOf(args[0]), message.content.length);
-        message.client.db.settings.updateWelcomeMessage.run(welcomeMessage, message.guild.id);
-        if (welcomeMessage.length > 1024) welcomeMessage = welcomeMessage.slice(0, 1021) + '...';
+        embed.setDescription(`The \`welcome message\` was successfully updated. ${success}\nUse \`clearwelcomemessage\` to clear the current \`welcome message\`.`);
+
+        this.client.db.settings.updateWelcomeMessage.run(text, context.guild.id);
+        if (text.length > 1024) text = text.slice(0, 1021) + '...';
 
         // Update status
-        const status = message.client.utils.getStatus(welcomeChannel, welcomeMessage);
-        const statusUpdate = (oldStatus != status) ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
+        const status = this.client.utils.getStatus(welcomeChannel, text);
+        const statusUpdate = oldStatus !== status ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
 
-        message.channel.send({
+        const payload = ({
             embeds: [embed
-                .addField('Status', statusUpdate, true)
-                .addField('Message', message.client.utils.replaceKeywords(welcomeMessage))
-            ]
+                .addFields([{name: 'Status', value: statusUpdate, inline: true}])
+                .addFields([{name: 'Message', value: this.client.utils.replaceKeywords(text)}]),],
         });
+
+        this.sendReply(context, payload);
     }
 };

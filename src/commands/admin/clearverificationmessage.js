@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success, verify} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder} = require('discord.js');
+const {success} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearVerificationMessageCommand extends Command {
     constructor(client) {
@@ -13,51 +13,79 @@ module.exports = class clearVerificationMessageCommand extends Command {
         Clears the \`verification message\` used in \`verification channel\`.
       `,
             type: client.types.ADMIN,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS', 'ADD_REACTIONS'],
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearverificationmessage']
+            clientPermissions: ['SendMessages', 'EmbedLinks', 'AddReactions'],
+            userPermissions: ['ManageGuild'],
+            examples: ['clearverificationmessage'],
         });
     }
 
-    async run(message, args) {
+    run(message) {
+        this.handle(message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
         let {
             verification_role_id: verificationRoleId,
             verification_channel_id: verificationChannelId,
             verification_message: oldVerificationMessage,
-            verification_message_id: verificationMessageId
-        } = message.client.db.settings.selectVerification.get(message.guild.id);
-        const verificationRole = message.guild.roles.cache.get(verificationRoleId);
-        const verificationChannel = message.guild.channels.cache.get(verificationChannelId);
+            verification_message_id: verificationMessageId,
+        } = this.client.db.settings.selectVerification.get(context.guild.id);
+        context.guild.roles.cache.get(verificationRoleId);
+        context.guild.channels.cache.get(
+            verificationChannelId
+        );
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(
+        const oldStatus = this.client.utils.getStatus(
             verificationRoleId && verificationChannelId && oldVerificationMessage
         );
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Verification`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`verification message\` was successfully cleared. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`verification message\` was successfully cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        message.client.db.settings.updateVerificationMessage.run(null, message.guild.id);
-        message.client.db.settings.updateVerificationMessageId.run(null, message.guild.id);
+        this.client.db.settings.updateVerificationMessage.run(
+            null,
+            context.guild.id
+        );
+        this.client.db.settings.updateVerificationMessageId.run(
+            null,
+            context.guild.id
+        );
 
         // Clear if no args provided
         const status = 'disabled';
-        const statusUpdate = (oldStatus != status) ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
+        const statusUpdate =
+            oldStatus != status
+                ? `\`${oldStatus}\` ➔ \`${status}\``
+                : `\`${oldStatus}\``;
 
-        message.channel.send({
+        const payload = {
             embeds: [embed
-                .addField('Verification Message ID', `${verificationMessageId} ➔ \`None\``)
-                .addField('Verification Message', `${oldVerificationMessage} ➔ \`None\``)
-                .addField('Status', `\`${statusUpdate}\``)]
-        })
+                .addFields({
+                    name: 'Verification Message ID',
+                    value: `${verificationMessageId} ➔ \`None\``
+                })
+                .addFields({
+                    name: 'Verification Message',
+                    value: `${oldVerificationMessage} ➔ \`None\``
+                })
+                .addFields([{name: 'Status', value: `\`${statusUpdate}\``}]),],
+        };
+
+        this.sendReply(context, payload);
     }
 };

@@ -1,6 +1,6 @@
 const Command = require('../Command.js');
-const {ReactionMenu} = require('../ReactionMenu.js');
-const {MessageEmbed} = require('discord.js');
+const ButtonMenu = require('../ButtonMenu.js');
+const {EmbedBuilder} = require('discord.js');
 
 module.exports = class EmojisCommand extends Command {
     constructor(client) {
@@ -9,45 +9,70 @@ module.exports = class EmojisCommand extends Command {
             aliases: ['e'],
             usage: 'emojis',
             description: 'Displays a list of all current emojis.',
-            type: client.types.INFO
+            type: client.types.INFO,
         });
     }
 
-    run(message, args) {
+    run(message) {
+        this.handle(message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
         const emojis = [];
-        message.guild.emojis.cache.forEach(e => emojis.push(`${e} **-** \`:${e.name}:\``));
+        context.guild.emojis.cache.forEach((e) =>
+            emojis.push(`${e} **-** \`:${e.name}:\``)
+        );
 
-        const embed = new MessageEmbed()
-            .setTitle(`Emoji List [${message.guild.emojis.cache.size}]`)
+        const embed = new EmbedBuilder()
+            .setTitle(`Emoji List [${context.guild.emojis.cache.size}]`)
             .setFooter({
-                text: message.member.displayName, iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         const interval = 25;
-        if (emojis.length === 0) message.channel.send({embeds: [embed.setDescription('No emojis found. 😢')]}); else if (emojis.length <= interval) {
-            const range = (emojis.length == 1) ? '[1]' : `[1 - ${emojis.length}]`;
-            message.channel.send({
-                embeds: [embed
-                    .setTitle(`Emoji List ${range}`)
-                    .setDescription(emojis.join('\n'))
-                    .setThumbnail(message.guild.iconURL({dynamic: true}))]
-            });
+        if (emojis.length === 0) {
+            const payload = {embeds: [embed.setDescription('No emojis found. 😢')]};
+            this.sendReply(context, payload);
+        }
+        else if (emojis.length <= interval) {
+            const range = emojis.length == 1 ? '[1]' : `[1 - ${emojis.length}]`;
 
-            // Reaction Menu
-        } else {
+            const payload = {
+                embeds: [
+                    embed
+                        .setTitle(`Emoji List ${range}`)
+                        .setDescription(emojis.join('\n'))
+                        .setThumbnail(context.guild.iconURL({dynamic: true})),
+                ]
+            };
+            this.sendReply(context, payload);
 
+        }
+        else {
             embed
                 .setTitle('Emoji List')
-                .setThumbnail(message.guild.iconURL({dynamic: true}))
+                .setThumbnail(context.guild.iconURL({dynamic: true}))
                 .setFooter({
-                    text: 'Expires after two minutes.\n' + message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text:
+                        'Expires after two minutes.\n' + this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author),
                 });
 
-            new ReactionMenu(message.client, message.channel, message.member, embed, emojis, interval);
+            new ButtonMenu(
+                this.client,
+                context.channel,
+                context.member,
+                embed,
+                emojis,
+                interval
+            );
         }
     }
 };

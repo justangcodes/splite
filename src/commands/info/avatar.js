@@ -1,6 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {SlashCommandBuilder} = require("@discordjs/builders");
+const {EmbedBuilder} = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class AvatarCommand extends Command {
     constructor(client) {
@@ -11,38 +11,44 @@ module.exports = class AvatarCommand extends Command {
             description: 'Displays a user\'s avatar (or your own, if no user is mentioned).',
             type: client.types.INFO,
             examples: ['avatar @split'],
-            slashCommand: new SlashCommandBuilder()
-                .addUserOption(option => option.setName('user').setDescription('The user to display the avatar of.'))
+            slashCommand: new SlashCommandBuilder().addUserOption((option) =>
+                option
+                    .setRequired(false)
+                    .setName('user')
+                    .setDescription('The user to display the avatar of.')
+            ),
         });
     }
 
-    run(message, args) {
-        const member = this.getMemberFromMention(message, args[0]) ||
-            message.guild.members.cache.get(args[0]) ||
-            message.member;
+    async run(message, args) {
+        const member =
+            await this.getGuildMember(message.guild, args.join(' ')) || message.member;
 
-        displayAvatar.call(this, member, message)
+        this.handle(member, message);
     }
 
-    async interact(interaction, args) {
+    async interact(interaction) {
+        await interaction.deferReply();
         const user = interaction.options.getUser('user') || interaction.member;
-        displayAvatar.call(this, user, interaction, true);
+        this.handle(user, interaction);
+    }
+
+    handle(targetUser, context) {
+        const embed = new EmbedBuilder()
+            .setAuthor({
+                name: this.getUserIdentifier(targetUser),
+                iconURL: this.getAvatarURL(targetUser),
+            })
+            .setDescription(`[Avatar URL](${this.getAvatarURL(targetUser)})`)
+            .setTitle(`${this.getUserIdentifier(targetUser)}'s Avatar`)
+            .setImage(this.getAvatarURL(targetUser))
+            .setFooter({
+                text: this.getUserIdentifier(context.member),
+                iconURL: this.getAvatarURL(context.member),
+            })
+            .setTimestamp()
+            .setColor(targetUser.displayHexColor);
+
+        this.sendReply(context, {embeds: [embed]});
     }
 };
-
-function displayAvatar(user, context, isInteraction = false) {
-    const embed = new MessageEmbed()
-        .setTitle(`${this.getUserIdentifier(user)}'s Avatar`)
-        .setImage(this.getAvatarURL(user))
-        .setFooter({
-            text: context.member.displayName,
-            iconURL: this.getAvatarURL(context.member)
-        })
-        .setTimestamp()
-        .setColor(user.displayHexColor);
-
-    if (isInteraction)
-        return context.reply({embeds: [embed]});
-
-    context.channel.send({embeds: [embed]});
-}

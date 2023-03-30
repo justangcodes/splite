@@ -1,7 +1,8 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {pong} = require('../../utils/emojis.json');
-const {fail} = require('../../utils/emojis.json')
+const {EmbedBuilder} = require('discord.js');
+const {fail} = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
+
 module.exports = class SnipeCommand extends Command {
     constructor(client) {
         super(client, {
@@ -9,38 +10,71 @@ module.exports = class SnipeCommand extends Command {
             usage: 'snipe',
             aliases: ['s', 'sn', 'sniper'],
             description: 'Shows the most recently deleted message in the channel',
-            type: client.types.INFO
+            type: client.types.INFO,
+            slashCommand: new SlashCommandBuilder()
         });
     }
 
-    async run(message, args) {
-        const embed = new MessageEmbed()
-            .setDescription('`Sniping...`')
-            .setColor("RANDOM");
-        const msg = await message.channel.send({embeds: [embed]});
+    run(message) {
+        this.handle(message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        await this.handle(interaction, true);
+    }
 
-        const snipedMSg = message.guild.snipes.get(message.channel.id)
+    async handle(context) {
+        const snipedMSg = context.guild.snipes.get(context.channel.id);
 
-        if (snipedMSg && (snipedMSg.content || snipedMSg.attachments.size > 0)) {
-            embed.setDescription(`${snipedMSg.content ? snipedMSg.content : ''}`)
+        if (snipedMSg && !this.client.utils.isEmptyMessage(snipedMSg)) {
+            const embed = new EmbedBuilder()
+                .setDescription(`${snipedMSg.content ? snipedMSg.content : ''}`)
                 .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text: this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author),
                 })
-                .setImage(`${snipedMSg.attachments.size > 0 ? snipedMSg.attachments.first().url : ''}`)
+                .setImage(
+                    `${
+                        snipedMSg.attachments.size > 0
+                            ? snipedMSg.attachments.first().url
+                            : ''
+                    }`
+                )
                 .setTimestamp()
-                .setAuthor(`${snipedMSg.author.username}#${snipedMSg.author.discriminator}`, `https://cdn.discordapp.com/avatars/${snipedMSg.author.id}/${snipedMSg.author.avatar}.png`)
-            msg.edit({embeds: [embed]});
-        } else {
-            embed.setTitle(`${message.client.name} Sniper`)
+                .setAuthor({
+                    name: this.getUserIdentifier(snipedMSg.author),
+                    iconURL: this.getAvatarURL(snipedMSg.author),
+                });
+
+            const payload = {
+                embeds: [embed],
+                // iterate over the attachments values and add them to files, remove the first one
+                files: snipedMSg.attachments.size > 1 ? [...snipedMSg.attachments.values()].slice(1).map(a => {
+                    return {
+                        attachment: a.url,
+                        name: a.name
+                    };
+                }) : [],
+            };
+
+            this.sendReply(context, payload);
+        }
+        else {
+            const embed = new EmbedBuilder()
+                .setTitle(`${this.client.name} Sniper`)
                 .setDescription(`${fail} There is nothing to snipe!`)
                 .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text: this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author),
                 })
                 .setTimestamp();
-            msg.edit({embeds: [embed]}).then(m => {
+
+            const payload = {embeds: [embed]};
+            let msg;
+            msg = await this.sendReply(context, payload);
+
+            msg.edit({embeds: [embed]}).then((m) => {
                 setTimeout(() => m.delete(), 5000);
             });
         }

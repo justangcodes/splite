@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success, fail} = require('../../utils/emojis.json');
 const {oneLine} = require('common-tags');
 
@@ -7,40 +7,57 @@ module.exports = class ToggleAnonymous extends Command {
     constructor(client) {
         super(client, {
             name: 'toggleanonymous',
-            aliases: ['tanon', 'toganon', 'toggleanon', 'anon', 'disableanonymous', 'enableanonymous'],
-            usage: 'toggleanonymous <role mention/ID>',
+            aliases: [
+                'tanon',
+                'toganon',
+                'toggleanon',
+                'anon',
+                'disableanonymous',
+                'enableanonymous',
+            ],
+            usage: 'toggleanonymous',
             description: oneLine`
         Enables or disables the /anonymous slash command for the server.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['toggleanonymous @Member']
+            userPermissions: ['ManageGuild'],
+            examples: ['toggleanon'],
         });
     }
 
-    run(message, args) {
-        const anonymousState = message.client.db.settings.selectAnonymous.pluck().get(message.guild.id);
+    run(message,) {
+        this.handle(message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction);
+    }
+
+    handle(context) {
+        const anonymousState = this.client.db.settings.selectAnonymous.pluck().get(context.guild.id);
         let description;
 
         // Disabled anonymous
         if (!anonymousState) {
-            message.client.db.settings.updateAnonymous.run(1, message.guild.id)
-            description = `Anonymous messages have been enabled! Type /anonymous to send an anonymous message. ${success}`;
-        } else {
-            message.client.db.settings.updateAnonymous.run(0, message.guild.id)
+            this.client.db.settings.updateAnonymous.run(1, context.guild.id);
+            description = `Anonymous messages have been enabled! Type /anonymous to send an anonymous context. ${success}`;
+        }
+        else {
+            this.client.db.settings.updateAnonymous.run(0, context.guild.id);
             description = `Anonymous messages have been disabled! ${fail}`;
         }
 
-        const embed = new MessageEmbed()
+        const payload = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
             .setDescription(description)
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        message.channel.send({embeds: [embed]});
+            .setTimestamp();
+
+        this.sendReply(context, {embeds: [payload]});
     }
 };

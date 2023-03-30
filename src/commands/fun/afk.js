@@ -1,5 +1,6 @@
 const Command = require('../Command.js');
-const {idle} = require("../../utils/emojis.json")
+const {idle} = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class AfkCommand extends Command {
     constructor(client) {
@@ -7,27 +8,41 @@ module.exports = class AfkCommand extends Command {
             name: 'afk',
 
             usage: 'afk <message>',
-            description: 'Set your afk status. While you are afk, everytime you get pinged, the user will see your afk status',
+            description:
+                'Set your afk status. While you are afk, everytime you get pinged, the user will see your afk status',
             type: client.types.FUN,
-            examples: [`afk Checking out ${client.name}!`]
+            examples: [`afk Checking out ${client.name}!`],
+            slashCommand: new SlashCommandBuilder().addStringOption((o) => o.setName('message').setRequired(false).setDescription('The message you want to set as afk')),
         });
     }
 
-    async run(message, args) {
+    run(message, args) {
+        const messageText = args.join(' ');
+        this.handle(messageText, message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const messageText = interaction.options.getString('message');
+        await this.handle(messageText, interaction);
+    }
+
+    async handle(messageText, context) {
         try {
             const d = new Date();
 
-            if (!args[0]) {
-                message.client.db.users.updateAfk.run("", d.valueOf(), message.author.id, message.guild.id)
-                message.guild.members.cache.get(message.author.id).setNickname(`[AFK]${message.member.nickname ? message.member.nickname : message.member.displayName}`).catch(err => console.log())
-                return message.channel.send(`${idle} ${message.author} You have gone afk!`)
-            } else {
-                message.client.db.users.updateAfk.run(args.join(' '), d.valueOf(), message.author.id, message.guild.id)
-                message.guild.members.cache.get(message.author.id).setNickname(`[AFK]${message.member.nickname ? message.member.nickname : message.member.displayName}`).catch(err => console.log())
-                return message.channel.send(`${idle} ${message.author} You have gone afk: ${args.join(' ')}`)
-            }
-        } catch (err) {
-            return this.sendErrorMessage(message, 1, 'Failed to set your afk', err.message);
+            context.client.db.users.updateAfk.run(
+                messageText || '',
+                d.valueOf(),
+                context.author.id,
+                context.guild.id
+            );
+
+            await (await this.getGuildMember(context.guild, context.author.id))?.setNickname(`[AFK]${context.member.nickname || context.member.displayName}`);
         }
+        catch (err) {
+            this.client.logger.error(err);
+        }
+        return this.sendReply(context, messageText ? `${idle} ${context.author} You have gone afk: ${messageText}` : `${idle} ${context.author} You have gone afk!`);
     }
 };

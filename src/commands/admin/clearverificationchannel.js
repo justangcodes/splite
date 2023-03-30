@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success, verify} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder} = require('discord.js');
+const {success} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearVerificationChannelCommand extends Command {
     constructor(client) {
@@ -13,51 +13,70 @@ module.exports = class clearVerificationChannelCommand extends Command {
         Clears the verification text channel for your server.
       `,
             type: client.types.ADMIN,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS', 'ADD_REACTIONS'],
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearverificationchannel']
+            clientPermissions: ['SendMessages', 'EmbedLinks', 'AddReactions'],
+            userPermissions: ['ManageGuild'],
+            examples: ['clearverificationchannel'],
         });
     }
 
-    async run(message, args) {
+    run(message) {
+        this.handle(message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
         let {
             verification_role_id: verificationRoleId,
             verification_channel_id: verificationChannelId,
             verification_message: verificationMessage,
-            verification_message_id: verificationMessageId
-        } = message.client.db.settings.selectVerification.get(message.guild.id);
-        const verificationRole = message.guild.roles.cache.get(verificationRoleId);
-        const oldVerificationChannel = message.guild.channels.cache.get(verificationChannelId) || '`None`';
+        } = this.client.db.settings.selectVerification.get(context.guild.id);
+
+        context.guild.roles.cache.get(verificationRoleId);
+
+        const oldVerificationChannel =
+            context.guild.channels.cache.get(verificationChannelId) || '`None`';
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(
+        const oldStatus = this.client.utils.getStatus(
             verificationRoleId && verificationChannelId && verificationMessage
         );
 
-        // Trim message
-        if (verificationMessage && verificationMessage.length > 1024)
-            verificationMessage = verificationMessage.slice(0, 1021) + '...';
-
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Verification`')
-            .setDescription(`The \`verification channel\` was successfully cleared. ${success}`)
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`verification channel\` was successfully cleared. ${success}`
+            )
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        message.client.db.settings.updateVerificationChannelId.run(null, message.guild.id);
+        this.client.db.settings.updateVerificationChannelId.run(
+            null,
+            context.guild.id
+        );
         const status = 'disabled';
-        const statusUpdate = (oldStatus != status) ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
+        const statusUpdate =
+            oldStatus != status
+                ? `\`${oldStatus}\` ➔ \`${status}\``
+                : `\`${oldStatus}\``;
 
-        message.channel.send({
-            embeds: [embed.addField('Verification Channel', `${oldVerificationChannel}  ➔ \`None\``)
-                .addField('Status', `${oldStatus} ➔ \`${statusUpdate}\``)]
-        })
+        const payload = {
+            embeds: [embed
+                .addFields({
+                    name: 'Verification Channel',
+                    value: `${oldVerificationChannel}  ➔ \`None\``
+                })
+                .addFields([{name: 'Status', value: `${oldStatus} ➔ \`${statusUpdate}\``}]),],
+        };
+
+        this.sendReply(context, payload);
     }
 };

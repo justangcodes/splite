@@ -1,34 +1,37 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
+const {AttachmentBuilder} = require('discord.js');
+
 
 module.exports = class baguetteCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'baguette',
-
             usage: 'baguette <user mention/id>',
             description: 'Generates a baguette image',
             type: client.types.FUN,
-            examples: ['baguette @split']
+            examples: ['baguette @split'],
         });
     }
 
     async run(message, args) {
+        const member = (await this.getGuildMember(message.guild, args.join(' '))) || message.author;
+        await this.handle(member, message, false);
+    }
 
-        const member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0]) || message.author;
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || interaction.author;
+        await this.handle(member, interaction, true);
+    }
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const buffer = await msg.client.nekoApi.generate("baguette", {url: this.getAvatarURL(member, "png")})
-                const attachment = new MessageAttachment(buffer, "baguette.png");
+    async handle(targetUser, context) {
+        const buffer = await context.client.nekoApi.generate('baguette', {
+            url: this.getAvatarURL(targetUser, 'png'),
+        });
+        const attachment = new AttachmentBuilder(buffer, { name:  'baguette.png' });
 
-                await message.channel.send({files: [attachment]})
-                await msg.delete()
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
-
+        const payload = {
+            files: [attachment],
+        }; await this.sendReply(context, payload);
     }
 };

@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
 
 module.exports = class EvalCommand extends Command {
     constructor(client) {
@@ -8,38 +8,51 @@ module.exports = class EvalCommand extends Command {
             usage: 'eval <code>',
             description: 'Executes the provided code and shows output.',
             type: client.types.OWNER,
-            ownerOnly: true,
             examples: ['eval 1 + 1']
         });
     }
 
     run(message, args) {
         const input = args.join(' ');
-        if (!input) return this.sendErrorMessage(message, 0, 'Please provide code to eval');
-        if (!input.toLowerCase().includes('token')) {
+        this.handle(input, message);
+    }
 
-            const embed = new MessageEmbed();
+    async interact(interaction) {
+        await interaction.deferReply();
+        const input = interaction.options.getString('code');
+        this.handle(input, interaction);
+    }
 
-            try {
-                let output = eval(input);
-                if (typeof output !== 'string') output = require('util').inspect(output, {depth: 0});
+    handle(input, context) {
+        if (!input) return this.sendErrorMessage(context, 0, 'Please provide code to eval');
 
-                embed
-                    .addField('Input', `\`\`\`js\n${input.length > 1024 ? 'Too large to display.' : input}\`\`\``)
-                    .addField('Output', `\`\`\`js\n${output.length > 1024 ? 'Too large to display.' : output}\`\`\``)
-                    .setColor('#66FF00');
+        const embed = new EmbedBuilder();
 
-            } catch (err) {
-                embed
-                    .addField('Input', `\`\`\`js\n${input.length > 1024 ? 'Too large to display.' : input}\`\`\``)
-                    .addField('Output', `\`\`\`js\n${err.length > 1024 ? 'Too large to display.' : err}\`\`\``)
-                    .setColor('#FF0000');
+        try {
+            let output = eval(input);
+            if (typeof output !== 'string') output = require('util').inspect(output, { depth: 0 });
+
+            if (output.includes(this.client.config.token)) {
+                return this.sendReply(context, '(╯°□°)╯︵ ┻━┻ MY token. **MINE**.');
             }
 
-            message.channel.send({embeds: [embed]});
-
-        } else {
-            message.channel.send('(╯°□°)╯︵ ┻━┻ MY token. **MINE**.');
+            embed
+                .addFields([{
+                    name: 'Input', value: `\`\`\`js\n${input.length > 1024 ? 'Too large to display.' : input}\`\`\``
+                }])
+                .addFields([{
+                    name: 'Output', value: `\`\`\`js\n${output.length > 1024 ? 'Too large to display.' : output}\`\`\``
+                }])
+                .setColor('#66FF00');
         }
+        catch (err) {
+            embed
+                .addFields([{name: 'Input', value: `\`\`\`js\n${input.length > 1024 ? 'Too large to display.' : input}\`\`\``}])
+                .addFields([{name: 'Output', value: `\`\`\`js\n${err.length > 1024 ? 'Too large to display.' : err}\`\`\``}])
+                .setColor('#FF0000');
+        }
+
+        this.sendReply(context, { embeds: [embed] });
+
     }
 };

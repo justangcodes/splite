@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const fetch = require('node-fetch');
+const {fail} = require('../../utils/emojis.json');
 
 module.exports = class BirdCommand extends Command {
     constructor(client) {
@@ -8,27 +9,47 @@ module.exports = class BirdCommand extends Command {
             name: 'bird',
             usage: 'bird',
             description: 'Finds a random bird for your viewing pleasure.',
-            type: client.types.FUN
+            type: client.types.FUN,
         });
     }
 
-    async run(message, args) {
+    async run(message) {
+        await this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        await this.handle(interaction, true);
+    }
+
+    async handle(context) {
         try {
             const res = await fetch('http://shibe.online/api/birds');
             const img = (await res.json())[0];
-            const embed = new MessageEmbed()
-                .setTitle('🐦  Chirp!  🐦')
-                .setImage(img)
-                .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
-                })
-                .setTimestamp()
-                .setColor(message.guild.me.displayHexColor);
-            message.channel.send({embeds: [embed]});
-        } catch (err) {
-            message.client.logger.error(err.stack);
-            this.sendErrorMessage(message, 1, 'Please try again in a few seconds', err.message);
+            const payload = {
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('🐦  Chirp!  🐦')
+                        .setImage(img)
+                        .setFooter({
+                            text: this.getUserIdentifier(context.author),
+                            iconURL: this.getAvatarURL(context.author),
+                        })
+                ]
+            };
+
+            this.sendReply(context, payload);
+        }
+        catch (err) {
+            const payload = {
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('Error')
+                        .setDescription(fail + ' ' + err.message)
+                        .setColor('Red')
+                ]
+            };
+            this.sendReply(context, payload);
         }
     }
 };

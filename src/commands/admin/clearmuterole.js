@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 
 module.exports = class clearMuteRoleCommand extends Command {
@@ -10,29 +10,46 @@ module.exports = class clearMuteRoleCommand extends Command {
             usage: 'clearmuterole',
             description: 'Clears the `mute role` your server.',
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['Clearmuterole']
+            userPermissions: ['ManageGuild'],
+            examples: ['Clearmuterole'],
         });
     }
 
-    run(message, args) {
-        const muteRoleId = message.client.db.settings.selectMuteRoleId.pluck().get(message.guild.id);
-        const oldMuteRole = message.guild.roles.cache.find(r => r.id === muteRoleId) || '`None`';
+    run(message) {
+        this.handle(message, false);
+    }
 
-        const embed = new MessageEmbed()
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const muteRoleId = this.client.db.settings.selectMuteRoleId
+            .pluck()
+            .get(context.guild.id);
+        const oldMuteRole =
+            context.guild.roles.cache.find((r) => r.id === muteRoleId) || '`None`';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`mute role\` was successfully cleared. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`mute role\` was successfully cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        message.client.db.settings.updateMuteRoleId.run(null, message.guild.id);
-        return message.channel.send({embeds: [embed.addField('Mute Role', `${oldMuteRole} ➔ \`None\``)]});
+        this.client.db.settings.updateMuteRoleId.run(null, context.guild.id);
 
+        const payload = ({
+            embeds: [embed.addFields([{name: 'Mute Role', value: `${oldMuteRole} ➔ \`None\``}])],
+        });
+
+        this.sendReply(context, payload);
     }
 };

@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 const {oneLine} = require('common-tags');
 
@@ -13,26 +13,40 @@ module.exports = class clearautokickCommand extends Command {
         Disables \`auto kick\` when enough warns have been issued.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearautokick']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearautokick'],
         });
     }
 
-    run(message, args) {
-        const autoKick = message.client.db.settings.selectAutoKick.pluck().get(message.guild.id) || 'disabled';
+    run(message) {
+        this.handle(message, false);
+    }
 
-        const embed = new MessageEmbed()
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const autoKick =
+            this.client.db.settings.selectAutoKick
+                .pluck()
+                .get(context.guild.id) || 'disabled';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context?.guild?.iconURL({dynamic: true}))
             .setDescription(`\`Auto kick\` was successfully disabled. ${success}`)
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        message.client.db.settings.updateAutoKick.run(null, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Auto Kick', `\`${autoKick}\` ➔ \`disabled\``)]});
+        this.client.db.settings.updateAutoKick.run(null, context.guild.id);
+
+        const payload = {embeds: [embed.addFields([{name: 'Auto Kick', value: `\`${autoKick}\` ➔ \`disabled\``}]),],};
+
+        this.sendReply(context, payload);
     }
 };

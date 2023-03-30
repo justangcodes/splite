@@ -1,36 +1,56 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearconfessionchannelCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'clearconfessionchannel',
-            aliases: ['clearconfessions', 'cconfessions', 'clearconfessionschannel'],
+            aliases: [
+                'clearconfessions',
+                'cconfessions',
+                'clearconfessionschannel',
+            ],
             usage: 'clearconfessionchannel',
             description: oneLine`
         Clears the current \`confessions channel\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearconfessionchannel']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearconfessionchannel'],
         });
     }
 
-    run(message, args) {
-        const embed = new MessageEmbed()
-            .setTitle('Settings: `Confessions`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`confessions channel\` was successfully cleared. ${success}`)
-            .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
-            })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+    run(message) {
+        this.handle(message, false);
+    }
 
-        message.client.db.settings.updateConfessionsChannelId.run(null, message.guild.id);
-        return message.channel.send({embeds: [embed.addField('Confessions Channel', `\`None\``)]});
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const embed = new EmbedBuilder()
+            .setTitle('Settings: `Confessions`')
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`confessions channel\` was successfully cleared. ${success}`
+            )
+            .setFooter({
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
+            })
+            .setTimestamp();
+
+        this.client.db.settings.updateConfessionsChannelId.run(
+            null,
+            context.guild.id
+        );
+
+        const payload = {embeds: [embed.addFields([{name: 'Confessions Channel', value: '`None`'}])],};
+
+        this.sendReply(context, payload);
     }
 };

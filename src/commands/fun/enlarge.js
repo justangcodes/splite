@@ -1,35 +1,73 @@
 const Command = require('../Command.js');
-const Discord = require("discord.js");
+const Discord = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
+const {EmbedBuilder, parseEmoji} = require('discord.js');
+const {fail} = require('../../utils/emojis.json');
 
 module.exports = class enlargeCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'enlarge',
-            aliases: ['en', 'el', 'big', 'maximize', 'bigemoji', 'enemoji', 'expand', 'enhance'],
+            aliases: [
+                'en',
+                'el',
+                'big',
+                'maximize',
+                'bigemoji',
+                'enemoji',
+                'expand',
+                'enhance',
+            ],
             usage: 'en <emoji>',
             description: 'Enlarges a custom emoji',
             type: client.types.FUN,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS'],
-            examples: ['enlarge 🙄']
+            clientPermissions: ['SendMessages', 'EmbedLinks'],
+            examples: ['enlarge 🙄'],
+            slashCommand: new SlashCommandBuilder().addStringOption((s) => s.setName('emoji').setRequired(true).setDescription('The emoji to enlarge')),
         });
     }
 
     async run(message, args) {
-        if (!args[0]) return this.sendHelpMessage(message, `Enlarge Emoji`);
-        let customemoji = Discord.Util.parseEmoji(args[0]) //Check if it's a emoji
+        if (!args[0]) return message.reply({embeds: [this.createHelpEmbed(message, 'Enlarge Emoji', this)]});
 
-        if (customemoji.id) {
-            const Link = `https://cdn.discordapp.com/emojis/${customemoji.id}.${
-                customemoji.animated ? "gif" : "png"
-            }`
-            return message.channel.send({files: [new Discord.MessageAttachment(Link)]});
-        } else {
-            this.sendErrorMessage(message, 0, 'Please mention a valid custom emoji.');
+        await this.handle(args[0], message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction.options.getString('emoji'), interaction);
+    }
+
+    async handle(text, context) {
+        try {
+            let customemoji = parseEmoji(text); //Check if it's a emoji
+
+            if (customemoji.id) {
+                const Link = `https://cdn.discordapp.com/emojis/${customemoji.id}.${
+                    customemoji.animated ? 'gif' : 'png'
+                }`;
+                const payload = {
+                    files: [new Discord.AttachmentBuilder(Link)],
+                };
+                this.sendReply(context, payload);
+            }
+            else {
+                this.sendErrorMessage(
+                    context,
+                    0,
+                    'Please mention a valid custom emoji.'
+                );
+            }
+        }
+        catch (err) {
+            const embed = new EmbedBuilder()
+                .setTitle('Error')
+                .setDescription(fail + ' ' + err.message)
+                .setColor('Red');
+            const payload = {
+                embeds: [embed]
+            };
+            await this.sendReply(context, payload);
         }
     }
-
-    catch(err) {
-        this.client.logger.error(err)
-        this.sendErrorMessage(message, 1, 'A error occured while adding the emoji. Common reasons are:- unallowed characters in emoji name, 50 emoji limit.', err)
-    }
-}
+};

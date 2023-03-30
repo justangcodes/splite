@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder, ChannelType} = require('discord.js');
+const {success, fail} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class SetMessageDeleteLogCommand extends Command {
     constructor(client) {
@@ -14,36 +14,72 @@ module.exports = class SetMessageDeleteLogCommand extends Command {
         \nUse \`clearmessagedeletelog\` to clear the current \`message delete log\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setmessagedeletelog #bot-log', 'clearmessagedeletelog']
+            userPermissions: ['ManageGuild'],
+            examples: ['setmessagedeletelog #bot-log', 'clearmessagedeletelog'],
         });
     }
 
     run(message, args) {
-        const messageDeleteLogId = message.client.db.settings.selectMessageDeleteLogId.pluck().get(message.guild.id);
-        const oldMessageDeleteLog = message.guild.channels.cache.get(messageDeleteLogId) || '`None`';
-        const embed = new MessageEmbed()
+        this.handle(args.join(' '), message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const channel = interaction.options.getChannel('channel');
+        this.handle(channel, interaction, true);
+    }
+
+    async handle(channel, context, isInteraction) {
+        const messageDeleteLogId =
+            this.client.db.settings.selectMessageDeleteLogId.pluck().get(context.guild.id);
+        const oldMessageDeleteLog = context.guild.channels.cache.get(messageDeleteLogId) || '`None`';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Logging`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        if (args.length === 0) {
-            return message.channel.send({embeds: [embed.addField('Current Message Delete Log', `${oldMessageDeleteLog}` || '`None`').setDescription(this.description)]});
+        if (!channel) {
+            const payload = ({
+                embeds: [
+                    embed
+                        .addFields({
+                            name: 'Current Message Delete Log',
+                            value: `${oldMessageDeleteLog}` || '`None`'
+                        })
+                        .setDescription(this.description),
+                ],
+            });
+
+            this.sendReply(context, payload);
         }
 
-        embed.setDescription(`The \`message delete log\` was successfully updated. ${success}\nUse \`clearmessagedeletelog\` to clear the current \`message delete log\`.`)
-        const messageDeleteLog = this.getChannelFromMention(message, args[0]) || message.guild.channels.cache.get(args[0]);
-        if (!messageDeleteLog || messageDeleteLog.type != 'GUILD_TEXT' || !messageDeleteLog.viewable)
-            return this.sendErrorMessage(message, 0, stripIndent`
-        Please mention an accessible text channel or provide a valid text channel ID
-      `);
-        message.client.db.settings.updateMessageDeleteLogId.run(messageDeleteLog.id, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Message Delete Log', `${oldMessageDeleteLog} ➔ ${messageDeleteLog}`)]});
+        channel = isInteraction ? channel : this.getChannelFromMention(context, channel) || context.guild.channels.cache.get(channel);
+
+        if (!channel || channel.type != ChannelType.GuildText || !channel.viewable) {
+            const payload = `${fail} Please mention an accessible text channel or provide a valid text channel ID.`;
+
+            this.sendReply(context, payload);
+            return;
+        }
+        this.client.db.settings.updateMessageDeleteLogId.run(channel.id, context.guild.id);
+
+        const payload = ({
+            embeds: [
+                embed.addFields({
+                    name: 'Message Delete Log',
+                    value: `${oldMessageDeleteLog} ➔ ${channel}`
+                }).setDescription(
+                    `The \`message delete log\` was successfully updated. ${success}\nUse \`clearmessagedeletelog\` to clear the current \`message delete log\`.`
+                ),
+            ],
+        });
+
+        await this.sendReplyAndDelete(context, payload);
     }
 };

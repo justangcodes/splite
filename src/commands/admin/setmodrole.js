@@ -1,6 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success} = require('../../utils/emojis.json');
+const {EmbedBuilder} = require('discord.js');
+const {success, fail} = require('../../utils/emojis.json');
 
 module.exports = class SetModRoleCommand extends Command {
     constructor(client) {
@@ -8,38 +8,69 @@ module.exports = class SetModRoleCommand extends Command {
             name: 'setmodrole',
             aliases: ['setmr', 'smr'],
             usage: 'setmodrole <role mention/ID>',
-            description: 'Sets the `mod role` for your server.\nUse \`clearmodrole\` to clear the current `mod role`.',
+            description:
+                'Sets the `mod role` for your server.\nUse `clearmodrole` to clear the current `mod role`.',
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setmodrole @Mod', 'clearmodrole']
+            userPermissions: ['ManageGuild'],
+            examples: ['setmodrole @Mod', 'clearmodrole'],
         });
     }
 
-    async run(message, args) {
-        const modRoleId = message.client.db.settings.selectModRoleId.pluck().get(message.guild.id);
-        const oldModRole = message.guild.roles.cache.find(r => r.id === modRoleId) || '`None`';
+    run(message, args) {
+        this.handle(args.join(' '), message, false);
+    }
 
-        const embed = new MessageEmbed()
+    async interact(interaction) {
+        await interaction.deferReply();
+        const role = interaction.options.getRole('role');
+        await this.handle(role, interaction, true);
+    }
+
+    async handle(role, context, isInteraction) {
+        const modRoleId = this.client.db.settings.selectModRoleId
+            .pluck()
+            .get(context.guild.id);
+        const oldModRole =
+            context.guild.roles.cache.find((r) => r.id === modRoleId) || '`None`';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
 
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        if (args.length === 0) {
-            return message.channel.send({embeds: [embed.addField('Current Mod Role', `${oldModRole}` || '`None`').setDescription(this.description)]});
+        if (!role) {
+            const payload = {
+                embeds: [
+                    embed
+                        .addFields([{name: 'Current Mod Role', value: `${oldModRole}` || '`None`'}])
+                        .setDescription(this.description),
+                ],
+            };
+            return this.sendReply(context, payload);
         }
 
         // Update role
-        embed.setDescription(`The \`mod role\` was successfully updated. ${success}\nUse \`clearmodrole\` to clear the current \`mod role\`.`)
-        const modRole = await this.getRole(message, args[0])
-        if (!modRole) return this.sendErrorMessage(message, 0, 'Please mention a role or provide a valid role ID');
-        message.client.db.settings.updateModRoleId.run(modRole.id, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Mod Role', `${oldModRole} ➔ ${modRole}`)]});
+        const modRole = isInteraction ? role : await this.getGuildRole(context.guild, role);
+
+        if (!modRole) {
+            const payload = `${fail} Please mention a role or provide a valid role ID`;
+
+            this.sendReply(context, payload);
+            return;
+        }
+        this.client.db.settings.updateModRoleId.run(modRole.id, context.guild.id);
+
+        const payload = ({
+            embeds: [embed.addFields([{name: 'Mod Role', value: `${oldModRole} ➔ ${modRole}`}])
+                .setDescription(`The \`mod role\` was successfully updated. ${success}\nUse \`clearmodrole\` to clear the current \`mod role\`.`)],
+        });
+
+        this.sendReply(context, payload);
     }
 };

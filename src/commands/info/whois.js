@@ -1,7 +1,8 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder, GatewayIntentBits} = require('discord.js');
 const moment = require('moment');
 const emojis = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 const statuses = {
     online: `${emojis.online} \`Online\``,
@@ -22,10 +23,12 @@ const flags = {
     TEAM_USER: 'Team User',
     SYSTEM: 'System',
     VERIFIED_BOT: `${emojis.verified_bot} \`Verified Bot\``,
-    EARLY_VERIFIED_BOT_DEVELOPER: `${emojis.verified_developer} \`Early Verified Bot Developer\``
+    EARLY_VERIFIED_BOT_DEVELOPER: `${emojis.verified_developer} \`Early Verified Bot Developer\``,
+    BOT_MANAGER: `${emojis.manager} \`Bot Manager\``,
+    BOT_OWNER: `${emojis.owner} \`Bot Owner\``
 };
 
-const elevatedPerms = ['ADMINISTRATOR', 'MANAGE_GUILD', 'MANAGE_ROLES', 'MANAGE_CHANNELS', 'BAN_MEMBERS', 'KICK_MEMBERS', 'MANAGE_MESSAGES', 'MANAGE_WEBHOOKS', 'MANAGE_EMOJIS_AND_STICKERS']
+const elevatedPerms = ['Administrator', 'ManageGuild', 'ManageRoles', 'ManageChannels', 'BanMembers', 'KickMembers', 'ManageMessages', 'ManageWebhooks', 'ManageEmojisAndStickers'];
 
 module.exports = class WhoIsCommand extends Command {
     constructor(client) {
@@ -35,71 +38,113 @@ module.exports = class WhoIsCommand extends Command {
             usage: 'whois [user mention/ID]',
             description: 'Fetches a user\'s information. If no user is given, your own information will be displayed.',
             type: client.types.INFO,
-            examples: ['whois @split']
+            examples: ['whois @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption(u => u.setRequired(false).setDescription('The user to get information for.').setName('user'))
         });
     }
 
     async run(message, args) {
-        const member = this.getMemberFromMention(message, args[0]) ||
-            message.guild.members.cache.get(args[0]) ||
-            message.member;
-        const userFlags = (await member.user.fetchFlags()).toArray();
+        const member =
+            await this.getGuildMember(message.guild, args[0]) || message.member;
+
+        await this.handle(member, message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        let user = interaction.options.getMember('user') || interaction.member;
+        await this.handle(user, interaction, true);
+    }
+
+    async handle(targetUser, context) {
+        const userFlags = (await targetUser.user.fetchFlags()).toArray();
+        if (this.client.getOwnerFromId(targetUser.id)) userFlags.push('BOT_OWNER');
+        if (this.client.getManagerFromId(targetUser.id)) userFlags.push('BOT_MANAGER');
         const activities = [];
         let customStatus;
-        if (member.presence?.activities) {
-            for (const activity of member.presence.activities.values()) {
+        if (targetUser.presence?.activities) {
+            for (const activity of targetUser.presence.activities.values()) {
                 switch (activity.type) {
-                    case 'PLAYING':
-                        activities.push(`Playing **${activity.name}**`);
-                        break;
-                    case 'LISTENING':
-                        if (member.user.bot) activities.push(`Listening to **${activity.name}**`);
-                        else activities.push(`Listening to **${activity.details}** by **${activity.state}**`);
-                        break;
-                    case 'WATCHING':
-                        activities.push(`Watching **${activity.name}**`);
-                        break;
-                    case 'STREAMING':
-                        activities.push(`Streaming **${activity.name}**`);
-                        break;
-                    case 'CUSTOM_STATUS':
-                        customStatus = activity.state;
-                        break;
+                case 'PLAYING':
+                    activities.push(`Playing **${activity.name}**`);
+                    break;
+                case 'LISTENING':
+                    if (targetUser.user.bot) activities.push(`Listening to **${activity.name}**`); else activities.push(`Listening to **${activity.details}** by **${activity.state}**`);
+                    break;
+                case 'WATCHING':
+                    activities.push(`Watching **${activity.name}**`);
+                    break;
+                case 'STREAMING':
+                    activities.push(`Streaming **${activity.name}**`);
+                    break;
+                case 'CUSTOM_STATUS':
+                    customStatus = activity.state;
+                    break;
                 }
             }
         }
         //Key Perms
-        const KeyPerms = member.permissions.toArray().filter(p => elevatedPerms.includes(p))
-        if (KeyPerms.includes('ADMINISTRATOR')) KeyPerms.move(KeyPerms.findIndex(p => p === 'ADMINISTRATOR'), 0)
-        if (KeyPerms.includes('MANAGE_GUILD') && KeyPerms.includes('ADMINISTRATOR')) KeyPerms.move(KeyPerms.findIndex(p => p === 'MANAGE_GUILD'), 1)
-        else if (KeyPerms.includes('MANAGE_GUILD')) KeyPerms.move(KeyPerms.findIndex(p => p === 'MANAGE_GUILD'), 0)
+        const KeyPerms = targetUser.permissions
+            .toArray()
+            .filter((p) => elevatedPerms.includes(p));
+        if (KeyPerms.includes('Administrator')) KeyPerms.move(KeyPerms.findIndex((p) => p === 'Administrator'), 0);
+        if (KeyPerms.includes('ManageGuild') && KeyPerms.includes('Administrator')) KeyPerms.move(KeyPerms.findIndex((p) => p === 'ManageGuild'), 1); else if (KeyPerms.includes('ManageGuild')) KeyPerms.move(KeyPerms.findIndex((p) => p === 'ManageGuild'), 0);
         // Trim roles
-        let roles = message.client.utils.trimArray([...member.roles.cache.values()].filter(r => !r.name.startsWith('#')));
-        roles = message.client.utils.removeElement(roles, message.guild.roles.everyone)
-            .sort((a, b) => b.position - a.position).join(' ');
-        const embed = new MessageEmbed()
-            .setTitle(`${member.displayName}'s Information`)
-            .setThumbnail(member.user.displayAvatarURL({dynamic: true}))
-            .addField('User', member.toString(), true)
-            .addField('Discriminator', `\`#${member.user.discriminator}\``, true)
-            .addField('ID', `\`${member.id}\``, true)
-            .addField('Status', statuses[member.presence?.status || 'offline'], true)
-            .addField('Bot', `\`${member.user.bot}\``, true)
-            .addField('Color Role', member.roles.color?.toString() || '`None`', true)
-            .addField('Highest Role', member.roles.highest.toString(), true)
-            .addField('Joined server on', `\`${moment(member.joinedAt).format('MMM DD YYYY')}\``, true)
-            .addField('Joined Discord on', `\`${moment(member.user.createdAt).format('MMM DD YYYY')}\``, true)
-            .addField('Roles', roles || '`None`')
-            .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+        let roles = this.client.utils.trimArray([...targetUser.roles.cache.values()].filter((r) => !r.name.startsWith('#')));
+        roles = this.client.utils
+            .removeElement(roles, targetUser.guild.roles.everyone)
+            .sort((a, b) => b.position - a.position)
+            .join(' ');
+        const embed = new EmbedBuilder()
+            .setTitle(`${targetUser.displayName}'s Information`)
+            .setThumbnail(this.getAvatarURL(targetUser.user))
+            .addFields([{name: 'User', value: targetUser.toString(), inline: true}])
+            .addFields([{name: 'Discriminator', value: `\`#${targetUser.user.discriminator}\``, inline: true}])
+            .addFields([{name: 'ID', value: `\`${targetUser.id}\``, inline: true}])
+            .addFields([{name: 'Bot', value: `\`${targetUser.user.bot}\``, inline: true}])
+            .addFields({
+                name: 'Voted on Top.gg', value: (await this.client.utils.checkTopGGVote(
+                    this.client,
+                    targetUser.id
+                )) ? 'Yes' : 'No', inline: true
             })
-            .setTimestamp()
-            .setColor(member.displayHexColor);
+            .addFields([{name: 'Highest Role', value: targetUser.roles.highest.toString(), inline: true}])
+            .addFields([{
+                name: 'Joined server on',
+                value: `\`${moment(targetUser.joinedAt).format('MMM DD YYYY')}\``,
+                inline: true
+            }])
+            .addFields([{
+                name: 'Joined Discord on',
+                value: `\`${moment(targetUser.user.createdAt).format('MMM DD YYYY')}\``,
+                inline: true
+            }])
+            .setFooter({
+                text: context.member.displayName, iconURL: this.getAvatarURL(context.author)
+            })
+            .setTimestamp();
+
+        if (this.client.intents.find(i => i === GatewayIntentBits.GuildPresences)) await embed.addFields([{
+            name: 'Status',
+            value: statuses[targetUser.presence?.status || 'offline'],
+            inline: true
+        }]);
         if (activities.length > 0) embed.setDescription(activities.join('\n'));
-        if (customStatus) embed.spliceFields(0, 0, {name: 'Custom Status', value: customStatus});
-        if (userFlags.length > 0) embed.addField('Badges', userFlags.map(flag => flags[flag]).join('\n'));
-        if (KeyPerms.length > 0) embed.addField('Key Permissions', `\`${KeyPerms.join('`, `')}\``)
-        message.channel.send({embeds: [embed]});
+        if (customStatus) await embed.spliceFields(0, 0, {
+            name: 'Custom Status', value: customStatus
+        });
+        if (userFlags.length > 0) await embed.addFields([{
+            name: 'Badges',
+            value: userFlags.map((flag) => flags[flag]).join('\n') || '`None`',
+            inline: true
+        }]);
+        await embed.addFields({name: 'Roles', value: roles || '`None`'});
+        if (KeyPerms.length > 0) await embed.addFields({
+            name: 'Key Permissions',
+            value: `${context.guild.ownerId === targetUser.id ? emojis.owner + ' **`SERVER OWNER`**, ' : ''} \`${KeyPerms.join('`, `')}\``
+        });
+
+        const payload = {embeds: [embed]};
+        await this.sendReply(context, payload);
     }
 };

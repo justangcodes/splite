@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearWelcomeChannelCommand extends Command {
     constructor(client) {
@@ -13,48 +13,81 @@ module.exports = class clearWelcomeChannelCommand extends Command {
         Clears the welcome message text channel for your server. 
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearwelcomechannel']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearwelcomechannel'],
         });
     }
 
-    run(message, args) {
+    run(message) {
+        this.handle(message, false);
+    }
 
-        let {welcome_channel_id: welcomeChannelId, welcome_message: welcomeMessage} =
-            message.client.db.settings.selectWelcomes.get(message.guild.id);
-        const oldWelcomeChannel = message.guild.channels.cache.get(welcomeChannelId) || '`None`';
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        let {
+            welcome_channel_id: welcomeChannelId,
+            welcome_message: welcomeMessage,
+        } = this.client.db.settings.selectWelcomes.get(context.guild.id);
+        const oldWelcomeChannel =
+            context.guild.channels.cache.get(welcomeChannelId) || '`None`';
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(welcomeChannelId, welcomeMessage);
+        const oldStatus = this.client.utils.getStatus(
+            welcomeChannelId,
+            welcomeMessage
+        );
 
         // Trim message
-        if (welcomeMessage && welcomeMessage.length > 1024) welcomeMessage = welcomeMessage.slice(0, 1021) + '...';
+        if (welcomeMessage && welcomeMessage.length > 1024)
+            welcomeMessage = welcomeMessage.slice(0, 1021) + '...';
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Welcomes`')
-            .setDescription(`The \`welcome channel\` was successfully cleared. ${success}`)
-            .addField('Message', message.client.utils.replaceKeywords(welcomeMessage) || '`None`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+            .setDescription(
+                `The \`welcome channel\` was successfully cleared. ${success}`
+            )
+            .addFields({
+                name: 'Message',
+                value: this.client.utils.replaceKeywords(welcomeMessage) || '`None`'
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setFooter({
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
+            })
+            .setTimestamp();
 
         // Clear if no args provided
-        message.client.db.settings.updateWelcomeChannelId.run(null, message.guild.id);
+        this.client.db.settings.updateWelcomeChannelId.run(
+            null,
+            context.guild.id
+        );
 
         // Update status
         const status = 'disabled';
-        const statusUpdate = (oldStatus != status) ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
+        const statusUpdate =
+            oldStatus != status
+                ? `\`${oldStatus}\` ➔ \`${status}\``
+                : `\`${oldStatus}\``;
 
-        return message.channel.send({
+        const payload = {
             embeds: [embed
-                .spliceFields(0, 0, {name: 'Channel', value: `${oldWelcomeChannel} ➔ \`None\``, inline: true})
-                .spliceFields(1, 0, {name: 'Status', value: statusUpdate, inline: true})
-            ]
-        });
+                .spliceFields(0, 0, {
+                    name: 'Channel',
+                    value: `${oldWelcomeChannel} ➔ \`None\``,
+                    inline: true,
+                })
+                .spliceFields(1, 0, {
+                    name: 'Status',
+                    value: statusUpdate,
+                    inline: true,
+                }),],
+        };
 
+        this.sendReply(context, payload);
     }
 };

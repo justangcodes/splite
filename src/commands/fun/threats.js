@@ -1,6 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
+const {AttachmentBuilder} = require('discord.js');
+
 
 module.exports = class threatsCommand extends Command {
     constructor(client) {
@@ -10,23 +10,29 @@ module.exports = class threatsCommand extends Command {
             usage: 'threats <user mention/id>',
             description: 'Generates a threats image',
             type: client.types.FUN,
-            examples: ['threats @split']
+            examples: ['threats @split'],
         });
     }
 
     async run(message, args) {
-        const member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0]) || message.author;
+        const member = (await this.getGuildMember(message.guild, args.join(' '))) || message.author;
+        await this.handle(member, message, false);
+    }
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const buffer = await msg.client.nekoApi.generate("threats", {url: this.getAvatarURL(member, "png")})
-                const attachment = new MessageAttachment(buffer, "threats.png");
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || interaction.author;
+        await this.handle(member, interaction, true);
+    }
 
-                await message.channel.send({files: attachment})
-                await msg.delete()
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
+    async handle(targetUser, context) {
+        const buffer = await context.client.nekoApi.generate('threats', {
+            url: this.getAvatarURL(targetUser, 'png'),
+        });
+        const attachment = new AttachmentBuilder(buffer, { name:  'threats.png' });
+
+        const payload = {
+            files: [attachment],
+        }; await this.sendReply(context, payload);
     }
 };

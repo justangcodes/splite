@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
+const emojis = require('../../utils/emojis.json');
 
 module.exports = class SetAdminRoleCommand extends Command {
     constructor(client) {
@@ -8,39 +9,74 @@ module.exports = class SetAdminRoleCommand extends Command {
             name: 'setadminrole',
             aliases: ['setar', 'sar'],
             usage: 'setadminrole <role mention/ID>',
-            description: 'Sets the `admin role` for your server.\nTo clear the `admin role`, type `clearadminrole`',
+            description:
+                'Sets the `admin role` for your server.\nTo clear the `admin role`, type `clearadminrole`',
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setadminrole @Admin', 'clearadminrole']
+            userPermissions: ['ManageGuild'],
+            examples: ['setadminrole @Admin', 'clearadminrole'],
         });
     }
 
-    async run(message, args) {
-        const adminRoleId = message.client.db.settings.selectAdminRoleId.pluck().get(message.guild.id);
-        const oldAdminRole = message.guild.roles.cache.find(r => r.id === adminRoleId) || '`None`';
+    run(message, args) {
+        this.handle(args.join(' '), message, false);
+    }
 
-        const embed = new MessageEmbed()
+    async interact(interaction) {
+        await interaction.deferReply();
+        const role = interaction.options.getRole('role');
+        await this.handle(role, interaction, true);
+    }
+
+    async handle(role, context, isInteraction) {
+        const adminRoleId = this.client.db.settings.selectAdminRoleId
+            .pluck()
+            .get(context.guild.id);
+        const oldAdminRole =
+            context.guild.roles.cache.find((r) => r.id === adminRoleId) ||
+            '`None`';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
 
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        // Clear if no args provided
-        if (args.length === 0) {
-            return message.channel.send({embeds: [embed.addField('Current Admin Role', `${oldAdminRole}` || '`None`').setDescription(this.description)]});
+        if (!role) {
+            const payload = {
+                embeds: [
+                    embed
+                        .addFields([{name: 'Current Admin Role', value: `${oldAdminRole}`}])
+                        .setDescription(this.description),
+                ]
+            };
+
+            this.sendReply(context, payload);
+            return;
         }
 
         // Update role
-        embed.setDescription(`The \`admin role\` was successfully updated. ${success}\nTo clear the \`admin role\`, type \`clearadminrole\``)
-        const adminRole = await this.getRole(message, args[0]);
-        if (!adminRole) return this.sendErrorMessage(message, 0, `Failed to find that role (${args[0]}), try using a role ID`);
+        const adminRole = isInteraction ? role : await this.getGuildRole(context.guild, role);
+        if (!adminRole) {
+            const payload = emojis.fail + ' Please mention a role or provide a valid role ID.';
+            this.sendReply(context, payload);
+            return;
+        }
 
-        message.client.db.settings.updateAdminRoleId.run(adminRole.id, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Admin Role', `${oldAdminRole} ➔ ${adminRole}`)]});
+        this.client.db.settings.updateAdminRoleId.run(
+            adminRole.id,
+            context.guild.id
+        );
+
+        const payload = {
+            embeds: [embed.addFields([{name: 'Admin Role', value: `${oldAdminRole} ➔ ${adminRole}`}]).setDescription(
+                `The \`admin role\` was successfully updated. ${success}\nTo clear the \`admin role\`, type \`clearadminrole\``
+            ),]
+        };
+
+        await this.sendReply(context, payload);
     }
 };

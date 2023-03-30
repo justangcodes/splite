@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder, ChannelType} = require('discord.js');
 const {oneLine, stripIndent} = require('common-tags');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class SlowmodeCommand extends Command {
     constructor(client) {
@@ -14,75 +15,116 @@ module.exports = class SlowmodeCommand extends Command {
         Provide a rate of 0 to disable.
       `,
             type: client.types.MOD,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS', 'MANAGE_CHANNELS'],
-            userPermissions: ['MANAGE_CHANNELS'],
-            examples: ['slowmode #general 2', 'slowmode 3']
+            clientPermissions: ['SendMessages', 'EmbedLinks', 'ManageChannels'],
+            userPermissions: ['ManageChannels'],
+            examples: ['slowmode #general 2', 'slowmode 3'],
+            slashCommand: new SlashCommandBuilder()
+                .addIntegerOption(i => i.setName('rate').setDescription('The rate (0-59) to set slowmode at. 0 to disable').setRequired(true))
+                .addChannelOption(c => c.setName('channel').setDescription('The channel to set slowmode in'))
+                .addStringOption(t => t.setName('reason').setDescription('The reason for the slowmode'))
         });
     }
 
-    async run(message, args) {
-        let index = 1;
+    run(message, args) {
         let channel = this.getChannelFromMention(message, args[0]) || message.guild.channels.cache.get(args[0]);
-        if (!channel) {
-            channel = message.channel;
-            index--;
-        }
+        if (channel) args.shift();
+        else channel = message.channel;
 
+        const rate = args[0];
+        if (rate) args.shift();
+        else return this.sendErrorMessage(message, 0, 'Please provide a rate limit between 0 and 59 seconds');
+
+        const reason = args.join(' ');
+
+        this.handle(channel, rate, reason, message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+
+        const channel = interaction.options.getChannel('channel') || interaction.channel;
+        const rate = interaction.options.getInteger('rate');
+        const reason = interaction.options.getString('reason');
+
+        await this.handle(channel, rate, reason, interaction);
+    }
+
+    async handle(channel, rate, reason, context) {
         // Check type and viewable
-        if (channel.type != 'GUILD_TEXT' || !channel.viewable) return this.sendErrorMessage(message, 0, stripIndent`
+        if (channel.type != ChannelType.GuildText || !channel.viewable)
+            return this.sendErrorMessage(
+                context,
+                0,
+                stripIndent`
       Please mention an accessible text channel or provide a valid text channel ID
-    `);
+    `
+            );
 
-        const rate = args[index];
-        if (!rate || rate < 0 || rate > 59) return this.sendErrorMessage(message, 0, stripIndent`
+        // Check rate
+        if (isNaN(rate) || rate < 0 || rate > 59)
+            return this.sendErrorMessage(
+                context,
+                0,
+                stripIndent`
       Please provide a rate limit between 0 and 59 seconds
-    `);
+    `
+            );
 
         // Check channel permissions
-        if (!channel.permissionsFor(message.guild.me).has(['MANAGE_CHANNELS']))
-            return this.sendErrorMessage(message, 0, 'I do not have permission to manage the provided channel');
+        if (!channel.permissionsFor(context.guild.members.me).has(['ManageChannels']))
+            return this.sendErrorMessage(
+                context,
+                0,
+                'I do not have permission to manage the provided channel'
+            );
 
-        let reason = args.slice(index + 1).join(' ');
+        // Check reason
         if (!reason) reason = '`None`';
         if (reason.length > 1024) reason = reason.slice(0, 1021) + '...';
 
         await channel.setRateLimitPerUser(rate, reason); // set channel rate
-        const status = (channel.rateLimitPerUser) ? 'enabled' : 'disabled';
-        const embed = new MessageEmbed()
+        const status = channel.rateLimitPerUser ? 'enabled' : 'disabled';
+        const embed = new EmbedBuilder()
             .setTitle('Slowmode')
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Slowmode disabled
         if (rate === '0') {
-            message.channel.send({
-                embeds: [embed
-                    .setDescription(`\`${status}\` ➔ \`disabled\``)
-                    .addField('Moderator', message.member.toString(), true)
-                    .addField('Channel', channel.toString(), true)
-                    .addField('Reason', reason)
-                ]
-            });
+            const payload = {
+                embeds: [
+                    embed
+                        .setDescription(`\`${status}\` ➔ \`disabled\``)
+                        .addFields([{name: 'Moderator', value: context.member.toString(), inline: true}])
+                        .addFields([{name: 'Channel', value: channel.toString(), inline: true}])
+                        .addFields([{name: 'Reason', value: reason}]),
+                ],
+            };
 
-            // Slowmode enabled
-        } else {
+            await this.sendReply(context, payload);
 
-            message.channel.send({
-                embeds: [embed
-                    .setDescription(`\`${status}\` ➔ \`enabled\``)
-                    .addField('Moderator', message.member.toString(), true)
-                    .addField('Channel', channel.toString(), true)
-                    .addField('Rate', `\`${rate}\``, true)
-                    .addField('Reason', reason)
-                ]
-            });
+        }
+        else { // Slowmode enabled
+            const payload = {
+                embeds: [
+                    embed
+                        .setDescription(`\`${status}\` ➔ \`enabled\``)
+                        .addFields([{name: 'Moderator', value: context.member.toString(), inline: true}])
+                        .addFields([{name: 'Channel', value: channel.toString(), inline: true}])
+                        .addFields([{name: 'Rate', value: `\`${rate}\``, inline: true}])
+                        .addFields([{name: 'Reason', value: reason}]),
+                ],
+            };
+            await this.sendReply(context, payload);
         }
 
         // Update mod log
-        this.sendModLogMessage(message, reason, {Channel: channel, Rate: `\`${rate}\``});
+        await this.sendModLogMessage(context, reason, {
+            Channel: channel,
+            Rate: `\`${rate}\``,
+        });
     }
 };

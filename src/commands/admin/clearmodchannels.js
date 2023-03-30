@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearModChannelsCommand extends Command {
     constructor(client) {
@@ -13,35 +13,53 @@ module.exports = class clearModChannelsCommand extends Command {
         Clears the moderator only text channels for your server.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearmodchannels']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearmodchannels'],
         });
     }
 
-    run(message, args) {
-        const {trimArray} = message.client.utils;
-        const modChannelIds = message.client.db.settings.selectModChannelIds.pluck().get(message.guild.id);
+    run(message) {
+        this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const {trimArray} = this.client.utils;
+        const modChannelIds = this.client.db.settings.selectModChannelIds
+            .pluck()
+            .get(context.guild.id);
         let oldModChannels = [];
         if (modChannelIds) {
             for (const channel of modChannelIds.split(' ')) {
-                oldModChannels.push(message.guild.channels.cache.get(channel));
+                oldModChannels.push(context.guild.channels.cache.get(channel));
             }
             oldModChannels = trimArray(oldModChannels).join(' ');
         }
         if (oldModChannels.length === 0) oldModChannels = '`None`';
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`mod channels\` were successfully clear. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`mod channels\` were successfully clear. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        message.client.db.settings.updateModChannelIds.run(null, message.guild.id);
-        return message.channel.send({embeds: [embed.addField('Mod Channels', `${oldModChannels} ➔ \`None\``)]});
+        this.client.db.settings.updateModChannelIds.run(
+            null,
+            context.guild.id
+        );
+
+        const payload = {embeds: [embed.addFields([{name: 'Mod Channels', value: `${oldModChannels} ➔ \`None\``}])]};
+
+        this.sendReply(context, payload);
     }
 };

@@ -1,8 +1,8 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const permissions = require('../../utils/permissions.json');
+const {EmbedBuilder} = require('discord.js');
+const {permissions} = require('../../utils/constants.json');
 const {oneLine} = require('common-tags');
-
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class PermissionsCommand extends Command {
     constructor(client) {
@@ -15,33 +15,43 @@ module.exports = class PermissionsCommand extends Command {
         If no user is given, your own permissions will be displayed.
       `,
             type: client.types.INFO,
-            examples: ['permissions @split']
+            examples: ['permissions @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption(u => u.setRequired(false).setDescription('The user to get permissions for.').setName('user')),
         });
     }
 
-    run(message, args) {
-        const member = this.getMemberFromMention(message, args[0]) ||
-            message.guild.members.cache.get(args[0]) ||
-            message.member;
+    async run(message, args) {
+        const user = await this.getGuildMember(message.guild, args[0]) || message.member;
+        this.handle(user, message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        const user = interaction.options.getUser('user') || interaction.member;
+        this.handle(user, interaction, true);
+    }
+
+    handle(member, context) {
         // Get member permissions
         const memberPermissions = member.permissions.toArray();
         const finalPermissions = [];
         for (const permission in permissions) {
-            if (memberPermissions.includes(permission)) finalPermissions.push(`+ ${permissions[permission]}`);
+            if (memberPermissions.includes(permission))
+                finalPermissions.push(`+ ${permissions[permission]}`);
             else finalPermissions.push(`- ${permissions[permission]}`);
         }
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle(`${member.displayName}'s Permissions`)
-            .setThumbnail(member.user.displayAvatarURL({dynamic: true}))
+            .setThumbnail(this.getAvatarURL(member.user))
             .setDescription(`\`\`\`diff\n${finalPermissions.join('\n')}\`\`\``)
             .setFooter({
-                  text: message.member.displayName,
-                  iconURL: message.author.displayAvatarURL()
-                })
-            .setTimestamp()
-            .setColor(member.displayHexColor);
-        message.channel.send({embeds: [embed]});
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
+            })
+            .setTimestamp();
+
+        const payload = {embeds: [embed]};
+        this.sendReply(context, payload);
     }
 };

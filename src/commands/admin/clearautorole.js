@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 const {oneLine} = require('common-tags');
 
@@ -13,27 +13,43 @@ module.exports = class clearAutoRoleCommand extends Command {
         clears the current \`auto role\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearautorole']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearautorole'],
         });
     }
 
-    run(message, args) {
-        const autoRoleId = message.client.db.settings.selectAutoRoleId.pluck().get(message.guild.id);
-        const oldAutoRole = message.guild.roles.cache.find(r => r.id === autoRoleId) || '`None`';
+    run(message) {
+        this.handle(message, false);
+    }
 
-        const embed = new MessageEmbed()
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const autoRoleId = this.client.db.settings.selectAutoRoleId
+            .pluck()
+            .get(context.guild.id);
+        const oldAutoRole =
+            context.guild.roles.cache.find((r) => r.id === autoRoleId) || '`None`';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`auto role\` was successfully cleared. ${success}`)
+            .setThumbnail(context?.guild?.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`auto role\` was successfully cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        message.client.db.settings.updateAutoRoleId.run(null, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Auto Role', `${oldAutoRole}`)]});
+        this.client.db.settings.updateAutoRoleId.run(null, context.guild.id);
+
+        const payload = {embeds: [embed.addFields([{name: 'Auto Role', value: `${oldAutoRole}`}])],};
+
+        this.sendReply(context, payload);
     }
 };

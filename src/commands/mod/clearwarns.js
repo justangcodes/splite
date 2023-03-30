@@ -1,6 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {oneLine} = require('common-tags');
+const {EmbedBuilder} = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class ClearWarnsCommand extends Command {
     constructor(client) {
@@ -9,46 +9,69 @@ module.exports = class ClearWarnsCommand extends Command {
             usage: 'clearwarns <user mention/ID> [reason]',
             description: 'Clears all the warns of the provided member.',
             type: client.types.MOD,
-            userPermissions: ['KICK_MEMBERS'],
-            examples: ['clearwarns @split']
+            userPermissions: ['KickMembers'],
+            examples: ['clearwarns @split'],
+            slashCommand: new SlashCommandBuilder()
+                .addUserOption(u => u.setRequired(true).setName('user').setDescription('The user to clear the warns of.'))
+                .addStringOption(s => s.setRequired(false).setName('reason').setDescription('The reason for clearing the warns.'))
         });
     }
 
-    run(message, args) {
-        if (!args[0]) return this.sendHelpMessage(message, `Clear Warns`);
-        const member = this.getMemberFromMention(message, args[0]) || message.guild.members.cache.get(args[0]);
-        if (!member)
-            return this.sendErrorMessage(message, 0, 'Please mention a user or provide a valid user ID');
-        if (member === message.member)
-            return this.sendErrorMessage(message, 0, 'You cannot clear your own warns');
-        // if (member.roles.highest.position >= message.member.roles.highest.position)
-        //   return this.sendErrorMessage(message, 0, 'You cannot clear the warns of someone with an equal or higher role');
+    async run(message, args) {
+        const member =
+            await this.getGuildMember(message.guild, args.join(' '));
+
+        if (!member.id)
+            return message.reply(
+                'Please provide a valid member to clear their afk status.'
+            );
 
         let reason = args.slice(1).join(' ');
+
+        this.handle(member, reason, message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const user = interaction.options.getMember('user');
+        const reason = interaction.options.getString('reason');
+        this.handle(user, reason, interaction);
+    }
+
+    handle(member, reason, context) {
+        if (member === context.member)
+            return this.sendErrorMessage(
+                context,
+                0,
+                'You cannot clear your own warns'
+            );
+        // if (member.roles.highest.position >= context.member.roles.highest.position)
+        //   return this.sendErrorMessage(context, 0, 'You cannot clear the warns of someone with an equal or higher role');
+
         if (!reason) reason = '`None`';
         if (reason.length > 1024) reason = reason.slice(0, 1021) + '...';
 
-        message.client.db.users.updateWarns.run('', member.id, message.guild.id);
+        this.client.db.users.updateWarns.run('', member.id, context.guild.id);
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Clear Warns')
             .setDescription(`${member}'s warns have been successfully cleared.`)
-            .addField('Moderator', message.member.toString(), true)
-            .addField('Member', member.toString(), true)
-            .addField('Warn Count', '`0`', true)
-            .addField('Reason', reason)
+            .addFields([{name: 'Moderator', value: context.member.toString(), inline: true}])
+            .addFields([{name: 'Member', value: member.toString(), inline: true}])
+            .addFields([{name: 'Warn Count', value: '`0`', inline: true}])
+            .addFields([{name: 'Reason', value: reason}])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        message.channel.send({embeds: [embed]});
-        message.client.logger.info(oneLine`
-      ${message.guild.name}: ${message.author.tag} cleared ${member.user.tag}'s warns
-    `);
+            .setTimestamp();
+
+        this.sendReply(context, {embeds: [embed]});
 
         // Update mod log
-        this.sendModLogMessage(message, reason, {Member: member, 'Warn Count': '`0`'});
+        this.sendModLogMessage(context, reason, {
+            Member: member,
+            'Warn Count': '`0`',
+        });
     }
 };

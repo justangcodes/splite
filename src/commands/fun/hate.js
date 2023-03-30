@@ -1,6 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
+const {AttachmentBuilder} = require('discord.js');
+
 
 module.exports = class HateCommand extends Command {
     constructor(client) {
@@ -8,30 +8,43 @@ module.exports = class HateCommand extends Command {
             name: 'hate',
             aliases: ['fuck', 'allmyhomies', 'homies'],
             usage: 'hate <text>',
-            description: 'Generates an "all my homies hate" image with provided text',
+            description:
+                'Generates an "all my homies hate" image with provided text',
             type: client.types.FUN,
             examples: [`hate ${client.name} is the best bot!`],
-            cooldown: 5
+            cooldown: 5,
         });
     }
 
     async run(message, args) {
+        if (!args[0]) return message.reply({embeds: [this.createHelpEmbed(message, 'Hate', this)]});
 
+        const text = await this.client.utils.replaceMentionsWithNames(
+            args.join(' '),
+            message.guild
+        );
+        await this.handle(text, message);
+    }
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const text = await message.client.utils.replaceMentionsWithNames(args.join(' '), message.guild)
-                const buffer = await msg.client.utils.generateImgFlipImage(242461078, `${text}`, `${text}`, '#EBDBD1', '#2E251E')
+    async interact(interaction) {
+        await interaction.deferReply();
+        const text = interaction.options.getString('text') || `${this.client.name}  is the best bot!`;
+        await this.handle(text, interaction);
+    }
 
-                if (buffer) {
-                    const attachment = new MessageAttachment(buffer, "allmyhomieshate.png");
-
-                    await message.channel.send({files: [attachment]})
-                    await msg.delete()
-                }
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
+    async handle(text, context) {
+        const buffer = await this.client.utils.generateImgFlipImage(
+            this.client,
+            242461078,
+            `${text}`,
+            `${text}`,
+            '#EBDBD1',
+            '#2E251E'
+        );
+        const attachment = new AttachmentBuilder(buffer, {name: 'changemymind.png'});
+        const payload = {
+            files: [attachment],
+        };
+        this.sendReply(context, payload);
     }
 };

@@ -1,13 +1,13 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
 const moment = require('moment');
-const permissions = require('../../utils/permissions.json');
+const { permissions } = require('../../utils/constants.json');
 
 module.exports = class RoleInfoCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'roleinfo',
-            aliases: ['role', 'ri'],
+            aliases: ['ri'],
             usage: 'roleinfo <role mention/ID>',
             description: 'Fetches information about the provided role.',
             type: client.types.INFO,
@@ -16,41 +16,65 @@ module.exports = class RoleInfoCommand extends Command {
     }
 
     run(message, args) {
-
-        const role = this.getRoleFromMention(message, args[0]) || message.guild.roles.cache.get(args[0]);
+        const role = this.getGuildRole(message.guild, args.join(' '));
         if (!role)
-            return this.sendErrorMessage(message, 0, 'Please mention a role or provide a valid role ID');
+            return this.sendErrorMessage(
+                message,
+                0,
+                'Please mention a role or provide a valid role ID'
+            );
 
+        this.handle(role, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const role = interaction.options.getRole('role');
+        this.handle(role, interaction, true);
+    }
+
+    handle(role, context) {
         // Get role permissions
         const rolePermissions = role.permissions.toArray();
         const finalPermissions = [];
         for (const permission in permissions) {
-            if (rolePermissions.includes(permission)) finalPermissions.push(`+ ${permissions[permission]}`);
+            if (rolePermissions.includes(permission))
+                finalPermissions.push(`+ ${permissions[permission]}`);
             else finalPermissions.push(`- ${permissions[permission]}`);
         }
 
         // Reverse role position
-        const position = `\`${message.guild.roles.cache.size - role.position}\`/\`${message.guild.roles.cache.size}\``;
+        const position = `\`${
+            context.guild.roles.cache.size - role.position
+        }\`/\`${context.guild.roles.cache.size}\``;
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Role Information')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .addField('Role', role.toString(), true)
-            .addField('Role ID', `\`${role.id}\``, true)
-            .addField('Position', position, true)
-            .addField('Mentionable', `\`${role.mentionable}\``, true)
-            .addField('Bot Role', `\`${role.managed}\``, true)
-            .addField('Color', `\`${role.hexColor.toUpperCase()}\``, true)
-            .addField('Members', `\`${role.members.size}\``, true)
-            .addField('Hoisted', `\`${role.hoist}\``, true)
-            .addField('Created On', `\`${moment(role.createdAt).format('MMM DD YYYY')}\``, true)
-            .addField('Permissions', `\`\`\`diff\n${finalPermissions.join('\n')}\`\`\``)
+            .setThumbnail(context.guild.iconURL({ dynamic: true }))
+            .addFields([{ name: 'Role', value: role.toString(), inline: true }])
+            .addFields([{ name: 'Role ID', value: `\`${role.id}\``, inline: true }])
+            .addFields([{ name: 'Position', value: position, inline: true }])
+            .addFields([{ name: 'Mentionable', value: `\`${role.mentionable}\``, inline: true }])
+            .addFields([{ name: 'Bot Role', value: `\`${role.managed}\``, inline: true }])
+            .addFields([{ name: 'Color', value: `\`${role.hexColor.toUpperCase()}\``, inline: true }])
+            .addFields([{ name: 'Members', value: `\`${role.members.size}\``, inline: true }])
+            .addFields([{ name: 'Hoisted', value: `\`${role.hoist}\``, inline: true }])
+            .addFields([{
+                name: 'Created On',
+                value: `\`${moment(role.createdAt).format('MMM DD YYYY')}\``,
+                inline: true
+            }])
+            .addFields([{
+                name: 'Permissions',
+                value: `\`\`\`diff\n${finalPermissions.join('\n')}\`\`\``
+            }])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author)
             })
-            .setTimestamp()
-            .setColor(role.hexColor);
-        message.channel.send({embeds: [embed]});
+            .setTimestamp();
+
+        const payload = { embeds: [embed] };
+        this.sendReply(context, payload);
     }
 };

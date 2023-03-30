@@ -1,6 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
+
 
 module.exports = class changemymindCommand extends Command {
     constructor(client) {
@@ -10,23 +9,24 @@ module.exports = class changemymindCommand extends Command {
             usage: 'changemymind <text>',
             description: 'Generates a changemymind image with provided text',
             type: client.types.FUN,
-            examples: [`changemymind ${client.name} is the best bot!`]
+            examples: [`changemymind ${client.name} is the best bot!`],
+            disabled: client.ameApi === null,
         });
     }
 
     async run(message, args) {
-        if (!args[0]) return this.sendErrorMessage(message, 0, 'Please provide some text');
+        if (!args[0]) return message.reply({embeds: [this.createHelpEmbed(message, 'Change My Mind!', this)]});
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const buffer = await msg.client.nekoApi.generate("changemymind", {text: `${args.join(' ')}`})
-                const attachment = new MessageAttachment(buffer, "changemymind.png");
+        await this.handle(args.join(' '), message, false);
+    }
 
-                await message.channel.send({files: [attachment]})
-                await msg.delete()
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
+    async interact(interaction) {
+        await interaction.deferReply();
+        const text = interaction.options.getString('text') || `${this.client.name}  is the best bot!`;
+        await this.handle(text, interaction, true);
+    }
+
+    async handle(text, context) {
+        await this.sendAmethystEmbed(context, 'changemymind', {text});
     }
 };

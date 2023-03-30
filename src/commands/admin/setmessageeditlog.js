@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder, ChannelType} = require('discord.js');
+const {success, fail} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class SetMessageEditLogCommand extends Command {
     constructor(client) {
@@ -14,37 +14,77 @@ module.exports = class SetMessageEditLogCommand extends Command {
         \nUse \`clearmessageeditlog\` to clear the current \`message edit log\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
+            userPermissions: ['ManageGuild'],
             examples: ['setmessageeditlog #bot-log', 'clearmessageeditlog']
         });
     }
 
     run(message, args) {
-        const messageEditLogId = message.client.db.settings.selectMessageEditLogId.pluck().get(message.guild.id);
-        const oldMessageEditLog = message.guild.channels.cache.get(messageEditLogId) || '`None`';
-        const embed = new MessageEmbed()
+        this.handle(args.join(' '), message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const channel = interaction.options.getChannel('channel');
+        this.handle(channel, interaction, true);
+    }
+
+    handle(channel, context, isInteraction) {
+        const messageEditLogId = this.client.db.settings.selectMessageEditLogId
+            .pluck()
+            .get(context.guild.id);
+        const oldMessageEditLog =
+            context.guild.channels.cache.get(messageEditLogId) || '`None`';
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Logging`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
 
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author)
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        if (args.length === 0) {
-            return message.channel.send({embeds: [embed.addField('Current Message Edit Log', `${oldMessageEditLog}` || '`None`').setDescription(this.description)]});
+        if (!channel) {
+            const payload = ({
+                embeds: [
+                    embed
+                        .addFields([{
+                            name: 'Current Message Edit Log',
+                            value: `${oldMessageEditLog}` || '`None`'
+                        }])
+                        .setDescription(this.description)
+                ]
+            });
+
+            this.sendReply(context, payload);
+            return;
         }
 
-        embed.setDescription(`The \`message edit log\` was successfully updated. ${success}\nUse \`clearmessageeditlog\` to clear the current \`message edit log\`.`)
-        const messageEditLog = this.getChannelFromMention(message, args[0]) || message.guild.channels.cache.get(args[0]);
-        if (!messageEditLog || messageEditLog.type != 'GUILD_TEXT' || !messageEditLog.viewable)
-            return this.sendErrorMessage(message, 0, stripIndent`
-        Please mention an accessible text channel or provide a valid text channel ID
-      `);
-        message.client.db.settings.updateMessageEditLogId.run(messageEditLog.id, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Message Edit Log', `${oldMessageEditLog} ➔ ${messageEditLog}`)]});
+        embed.setDescription(
+            `The \`message edit log\` was successfully updated. ${success}\nUse \`clearmessageeditlog\` to clear the current \`message edit log\`.`
+        );
+
+        channel = isInteraction ? channel : this.getChannelFromMention(context, channel) || context.guild.channels.cache.get(channel);
+
+        if (!channel || channel.type != ChannelType.GuildText || !channel.viewable) {
+            const payload = `${fail} The channel must be a text channel. Please try again.`;
+
+            this.sendReply(context, payload);
+            return;
+        }
+        this.client.db.settings.updateMessageEditLogId.run(channel.id, context.guild.id);
+
+        const payload = ({
+            embeds: [
+                embed.addFields({
+                    name: 'Message Edit Log',
+                    value: `${oldMessageEditLog} ➔ ${channel}`
+                })
+            ]
+        });
+
+        this.sendReply(context, payload);
     }
 };

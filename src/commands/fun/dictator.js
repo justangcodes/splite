@@ -1,6 +1,4 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
 
 module.exports = class dictatorCommand extends Command {
     constructor(client) {
@@ -10,23 +8,23 @@ module.exports = class dictatorCommand extends Command {
             usage: 'dictator <user mention/id>',
             description: 'Generates a dictator image',
             type: client.types.FUN,
-            examples: ['dictator @split']
+            examples: ['dictator @split'],
+            disabled: client.ameApi === null,
         });
     }
 
     async run(message, args) {
-        const member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0]) || message.author;
+        const member = (await this.getGuildMember(message.guild, args.join(' '))) || message.author;
+        await this.handle(member, message, false);
+    }
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const buffer = await msg.client.ameApi.generate("dictator", {url: this.getAvatarURL(member, "png")});
-                const attachment = new MessageAttachment(buffer, "dictator.png");
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || interaction.author;
+        await this.handle(member, interaction, true);
+    }
 
-                await message.channel.send({files: [attachment]})
-                await msg.delete()
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
+    async handle(targetUser, context) {
+        await this.sendAmethystEmbed(context, 'dictator', {targetUser});
     }
 };

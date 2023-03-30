@@ -1,4 +1,4 @@
-const Command = require("../Command");
+const Command = require('../Command');
 module.exports = class MusicPauseCommand extends Command {
     constructor(client) {
         super(client, {
@@ -10,13 +10,29 @@ module.exports = class MusicPauseCommand extends Command {
         });
     }
 
-    async run(message, args) {
-        const queue = this.client.player.getQueue(message.guild.id);
+    run(message) {
+        this.handle(message);
+    }
 
-        if (!queue) return message.channel.send(`No music currently playing ${message.author}... try again ? ❌`);
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction);
+    }
+
+    handle(context) {
+        const queue = this.client.player.getQueue(context.guild.id);
+
+        if (!queue)
+            return this.sendReplyAndDelete(context,
+                `No music currently playing ${context.author}... try again ? ❌`
+            );
 
         const success = queue.setPaused(true);
 
-        return message.channel.send(success ? `Current music ${queue.current.title} paused ✅` : `Something went wrong ${message.author}... try again ? ❌`);
+        return this.sendReplyAndDelete(context,
+            success
+                ? `Current music ${queue.current.title} paused ✅`
+                : `Something went wrong ${context.author}... try again ? ❌`
+        );
     }
 };

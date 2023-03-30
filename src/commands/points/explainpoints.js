@@ -1,7 +1,8 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {stripIndent} = require('common-tags');
-const emojis = require('../../utils/emojis.json')
+const emojis = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class ExplainPointsCommand extends Command {
     constructor(client) {
@@ -9,33 +10,52 @@ module.exports = class ExplainPointsCommand extends Command {
             name: 'explainpoints',
             aliases: ['explainp', 'ep', 'howtopoints', 'h2points'],
             usage: 'explainpoints',
-            description: `Explains the various aspects about ${client.name}\'s points and crown systems.`,
-            type: client.types.POINTS
+            description: `Explains the various aspects about ${client.name}'s points and crown systems.`,
+            type: client.types.POINTS,
+            slashCommand: new SlashCommandBuilder()
         });
     }
 
-    run(message, args) {
+    run(message) {
+        this.handle(message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
         // Get disabled leaderboard
-        let disabledCommands = message.client.db.settings.selectDisabledCommands.pluck().get(message.guild.id) || [];
-        if (typeof (disabledCommands) === 'string') disabledCommands = disabledCommands.split(' ');
+        let disabledCommands =
+            this.client.db.settings.selectDisabledCommands
+                .pluck()
+                .get(context.guild.id) || [];
+        if (typeof disabledCommands === 'string')
+            disabledCommands = disabledCommands.split(' ');
 
-        const prefix = message.client.db.settings.selectPrefix.pluck().get(message.guild.id); // Get prefix
-        const {message_points: messagePoints, command_points: commandPoints, voice_points: voicePoints}
-            = message.client.db.settings.selectPoints.get(message.guild.id);
+        const prefix = this.client.db.settings.selectPrefix
+            .pluck()
+            .get(context.guild.id); // Get prefix
+        const {
+            message_points: messagePoints,
+            command_points: commandPoints,
+            voice_points: voicePoints,
+        } = this.client.db.settings.selectPoints.get(context.guild.id);
 
         // Points per
         let earningPoints =
             stripIndent`You can earn points (${emojis.point}) in the following ways: by sending **messages**, by using **commands**,` +
-            ` by playing geoGuessr (To play, type **\`${prefix}geoguessr\`**)and by spending time in **voice chat** ${emojis.voice}.`;
-        if (!disabledCommands.includes('givepoints')) earningPoints +=
-            ` And if someone's feeling generous, they can give you points ${emojis.point} by using the \`${prefix}give\` command.\nAdditionally, points can be used to send anonymous messages (Type **\`/anonymous\`**) in a server if allowed by admins.`;
+            ` playing geoGuessr, playing trivia, and spending time in **voice chat** ${emojis.voice}.`;
+        if (!disabledCommands.includes('givepoints'))
+            earningPoints += ` And if someone's feeling generous, they can give you points ${emojis.point} by using the \`${prefix}give\` command.\nAdditionally, points can be used to send anonymous messages (Type **\`/anonymous\`**) in a server if allowed by admins.`;
 
         const pointsPer = stripIndent`
       Message Points   :: ${messagePoints} points per message
       Command Points   :: ${commandPoints} points per command
       Voice Points     :: ${voicePoints} points per minute
-      GeoGuessr Points :: 25 points per correct answer
+      GeoGuessr Points :: 10 points per correct answer
+      Trivia Points    :: 10 points per correct answer
     `;
 
         earningPoints += ` Here is this server's ${emojis.point} **points per action**:\n\`\`\`asciidoc\n${pointsPer}\`\`\``;
@@ -64,7 +84,8 @@ module.exports = class ExplainPointsCommand extends Command {
             leaderboard += ` To see the leaderboard itself, use the \`${prefix}leaderboard\` command.`;
 
         // The Crown
-        let crown = stripIndent`
+        let crown =
+            stripIndent`
       If a \`crown role\` ${emojis.crown} is set, then the person with the most points every 24 hours will win!` +
             ` Additionally, everyone's points ${emojis.point} will be reset to **0** (total points will remain untouched).
     `;
@@ -72,19 +93,22 @@ module.exports = class ExplainPointsCommand extends Command {
         if (!disabledCommands.includes('crown'))
             crown += `\nUse the \`${prefix}crown\` command for server specific information.`;
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle(`${emojis.point} Points and Crown ${emojis.crown}`)
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .addField(`Earning Points ${emojis.point}`, earningPoints)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .addFields([{name: `Earning Points ${emojis.point}`, value: earningPoints}])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        if (checkingPoints) embed.addField(`Checking Points ${emojis.point}`, checkingPoints);
-        if (leaderboard) embed.addField('The Leaderboard', leaderboard);
-        embed.addField(`The Crown ${emojis.crown}`, crown);
-        message.channel.send({embeds: [embed]});
+            .setTimestamp();
+        if (checkingPoints)
+            embed.addFields([{name: `Checking Points ${emojis.point}`, value: checkingPoints}]);
+        if (leaderboard) embed.addFields([{name: 'The Leaderboard', value: leaderboard}]);
+        embed.addFields([{name: `The Crown ${emojis.crown}`, value: crown}]);
+
+
+        const payload = {embeds: [embed]};
+        this.sendReply(context, payload);
     }
 };

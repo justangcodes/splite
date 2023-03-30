@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {oneLine,} = require('common-tags');
 
 module.exports = class clearRoleLogCommand extends Command {
     constructor(client) {
@@ -13,28 +13,45 @@ module.exports = class clearRoleLogCommand extends Command {
         clears the role change log text channel for your server.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearrolelog']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearrolelog'],
         });
     }
 
-    run(message, args) {
-        const roleLogId = message.client.db.settings.selectRoleLogId.pluck().get(message.guild.id);
-        const oldRoleLog = message.guild.channels.cache.get(roleLogId) || '`None`';
-        const embed = new MessageEmbed()
+    run(message) {
+        this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const roleLogId = this.client.db.settings.selectRoleLogId
+            .pluck()
+            .get(context.guild.id);
+        const oldRoleLog =
+            context.guild.channels.cache.get(roleLogId) || '`None`';
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Logging`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`role log\` was successfully cleared. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`role log\` was successfully cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        message.client.db.settings.updateRoleLogId.run(null, message.guild.id);
-        return message.channel.send({embeds: [embed.addField('Role Log', `${oldRoleLog} ➔ \`None\``)]});
+        this.client.db.settings.updateRoleLogId.run(null, context.guild.id);
 
+        const payload = ({
+            embeds: [embed.addFields([{name: 'Role Log', value: `${oldRoleLog} ➔ \`None\``}])],
+        });
+
+        this.sendReply(context, payload);
     }
 };

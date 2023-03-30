@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder, ChannelType} = require('discord.js');
 const {oneLine, stripIndent} = require('common-tags');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class PurgeCommand extends Command {
     constructor(client) {
@@ -15,116 +16,167 @@ module.exports = class PurgeCommand extends Command {
         Messages older than 2 weeks old cannot be deleted.
       `,
             type: client.types.MOD,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS', 'MANAGE_MESSAGES'],
-            userPermissions: ['MANAGE_MESSAGES'],
-            examples: ['purge 20', 'purge #general 10', 'purge @split 50', 'purge #general @split 5']
+            clientPermissions: ['SendMessages', 'EmbedLinks', 'ManageMessages'],
+            userPermissions: ['ManageMessages'],
+            examples: [
+                'purge 20',
+                'purge #general 10',
+                'purge @split 50',
+                'purge #general @split 5',
+            ],
+            slashCommand: new SlashCommandBuilder().setName('purge').setDescription('Delete specific amount of messages by a user or in a channel.')
+                .addIntegerOption(i => i.setName('amount').setDescription('The amount of messages to purge.').setRequired(true))
+                .addUserOption(u => u.setName('user').setDescription('The user to purge messages from.').setRequired(false))
+                .addChannelOption(c => c.setName('channel').setDescription('The channel to purge messages from.').setRequired(false))
+                .addStringOption(s => s.setName('reason').setDescription('The reason for the purge.').setRequired(false))
         });
     }
 
     async run(message, args) {
-
         let channel = this.getChannelFromMention(message, args[0]) || message.guild.channels.cache.get(args[0]);
-        if (channel) {
-            args.shift();
-        } else channel = message.channel;
+        if (channel) args.shift();
+        else channel = message.channel;
 
-        // Check type and viewable
-        if (channel.type != 'GUILD_TEXT' || !channel.viewable) return this.sendErrorMessage(message, 0, stripIndent`
-      Please mention an accessible text channel or provide a valid text channel ID
-    `);
-
-        let member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0])
-        if (member) {
-            args.shift();
-        }
+        let member = await this.getGuildMember(message.guild, args[0]);
+        if (member) args.shift();
 
         let amount = parseInt(args[0]);
-        if (amount > 100) amount = 100;
-        if (isNaN(amount) === true || !amount || amount < 0)
-            return this.sendErrorMessage(message, 0, 'Please provide a message count between 1 and 100');
-
-        // Check channel permissions
-        if (!channel.permissionsFor(message.guild.me).has(['MANAGE_MESSAGES']))
-            return this.sendErrorMessage(message, 0, 'I do not have permission to manage messages in the provided channel');
 
         let reason = args.slice(1).join(' ');
+
+        await this.handle(member, channel, amount, reason, message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getMember('user');
+        const channel = interaction.options.getChannel('channel') || interaction.channel;
+        const amount = interaction.options.getInteger('amount');
+        const reason = interaction.options.getString('reason');
+
+        await this.handle(member, channel, amount, reason, interaction);
+    }
+
+    async handle(member, channel, amount, reason, context) {
+        // Check type and viewable
+        if (channel.type !== ChannelType.GuildText || !channel.viewable)
+            return this.sendErrorMessage(
+                context,
+                0,
+                stripIndent`
+      Please mention an accessible text channel or provide a valid text channel ID
+    `
+            );
+
+        if (amount > 100) amount = 100;
+        if (isNaN(amount) === true || !amount || amount < 0)
+            return this.sendErrorMessage(
+                context,
+                0,
+                'Please provide a message count between 1 and 100'
+            );
+
+        // Check channel permissions
+        if (!channel.permissionsFor(context.guild.members.me).has(['ManageMessages']))
+            return this.sendErrorMessage(
+                context,
+                0,
+                'I do not have permission to manage messages in the provided channel'
+            );
+
         if (!reason) reason = '`None`';
         if (reason.length > 1024) reason = reason.slice(0, 1021) + '...';
-
-        await message.delete(); // Delete command message
 
         // Find member messages if given
         let messages;
         if (member) {
-            messages = (await channel.messages.fetch({limit: amount})).filter(m => m.member.id === member.id);
-        } else messages = amount;
+            messages = (await channel.messages.fetch({limit: amount})).filter(
+                (m) => m?.author?.id && m.author.id === member.id
+            );
+        }
+        else messages = amount;
 
-        if (messages.size === 0) { // No messages found
+        if (messages.size === 0) {
+            // No messages found
 
-            message.channel.send({
-                embeds: [new MessageEmbed()
-                    .setTitle('Purge')
-                    .setDescription(`
+            this.sendReplyAndDelete(context, {
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('Purge')
+                        .setDescription(
+                            `
             Unable to find any messages from ${member}. 
             This message will be deleted after \`10 seconds\`.
-          `)
-                    .addField('Channel', channel.toString(), true)
-                    .addField('Member', member.toString())
-                    .addField('Found Messages', `\`${messages.size}\``, true)
-                    .setFooter({
-                        text: message.member.displayName,
-                        iconURL: message.author.displayAvatarURL()
-                    })
-                    .setTimestamp()
-                    .setColor(message.guild.me.displayHexColor)
-                ]
-            }).then(msg => {
-                setTimeout(() => msg.delete(), 10000);
-            }).catch(err => message.client.logger.error(err.stack));
+          `
+                        )
+                        .addFields([{name: 'Channel', value: channel.toString(), inline: true}])
+                        .addFields([{name: 'Member', value: member.toString()}])
+                        .addFields([{name: 'Found Messages', value: `\`${messages.size}\``, inline: true}])
+                        .setFooter({
+                            text: context.member.displayName,
+                            iconURL: this.getAvatarURL(context.author),
+                        })
+                        .setTimestamp()
+                ],
+            }, 10000);
+        }
+        else {
+            // Purge messages
 
-        } else { // Purge messages
-
-            channel.bulkDelete(messages, true).then(messages => {
-                const embed = new MessageEmbed()
+            channel.bulkDelete(messages, true).then((messages) => {
+                const embed = new EmbedBuilder()
                     .setTitle('Purge')
-                    .setDescription(`
-            Successfully deleted **${messages.size}** message(s). 
+                    .setDescription(
+                        `
+            Successfully deleted **${messages.size}** context(s). 
             This message will be deleted after \`10 seconds\`.
-          `)
-                    .addField('Channel', channel.toString(), true)
-                    .addField('Message Count', `\`${messages.size}\``, true)
-                    .addField('Reason', reason)
+          `
+                    )
+                    .addFields([{name: 'Channel', value: channel.toString(), inline: true}])
+                    .addFields([{name: 'Message Count', value: `\`${messages.size}\``, inline: true}])
+                    .addFields([{name: 'Reason', value: reason}])
                     .setFooter({
-                        text: message.member.displayName,
-                        iconURL: message.author.displayAvatarURL()
+                        text: context.member.displayName,
+                        iconURL: this.getAvatarURL(context.author),
                     })
                     .setTimestamp()
-                    .setColor(message.guild.me.displayHexColor);
+                    .setColor(context.guild.members.me.displayHexColor);
 
                 if (member) {
                     embed
-                        .spliceFields(1, 1, {name: 'Found Messages', value: `\`${messages.size}\``, inline: true})
-                        .spliceFields(1, 0, {name: 'Member', value: member.toString(), inline: true});
+                        .spliceFields(1, 1, {
+                            name: 'Found Messages',
+                            value: `\`${messages.size}\``,
+                            inline: true,
+                        })
+                        .spliceFields(1, 0, {
+                            name: 'Member',
+                            value: member.toString(),
+                            inline: true,
+                        });
                 }
 
-                message.channel.send({embeds: [embed]}).then(msg => {
-                    setTimeout(() => msg.delete(), 5000);
-                })
-                    .catch(err => message.client.logger.error(err.stack));
+                this.sendReplyAndDelete(context, {embeds: [embed]}, 10000);
+                // context.channel
+                //     .send({embeds: [embed]})
+                //     .then((msg) => {
+                //         setTimeout(() => msg.delete(), 10000);
+                //     })
+                //     .catch((err) => this.client.logger.error(err.stack));
             });
         }
 
         // Update mod log
         const fields = {
-            Channel: channel
+            Channel: channel,
         };
 
         if (member) {
             fields['Member'] = member.toString();
             fields['Found Messages'] = `\`${messages.size}\``;
-        } else fields['Message Count'] = `\`${amount}\``;
+        }
+        else fields['Message Count'] = `\`${amount}\``;
 
-        this.sendModLogMessage(message, reason, fields);
-
+        await this.sendModLogMessage(context, reason, fields);
     }
 };

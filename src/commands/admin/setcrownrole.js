@@ -1,7 +1,8 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 const {oneLine} = require('common-tags');
+const emojis = require('../../utils/emojis.json');
 
 module.exports = class SetCrownRoleCommand extends Command {
     constructor(client) {
@@ -15,73 +16,90 @@ module.exports = class SetCrownRoleCommand extends Command {
         To disable the crown feature, run this command without providing a role.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setcrownrole @Crowned', 'clearcrownrole']
+            userPermissions: ['ManageGuild'],
+            examples: ['setcrownrole @Crowned', 'clearcrownrole'],
         });
     }
 
-    async run(message, args) {
+    run(message, args) {
+        this.handle(args.join(' '), message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const prefix = interaction.options.getRole('role');
+        await this.handle(prefix, interaction, true);
+    }
+
+    async handle(role, context, isInteraction) {
         let {
             crown_role_id: crownRoleId,
             crown_channel_id: crownChannelId,
             crown_message: crownMessage,
-            crown_schedule: crownSchedule
-        } = message.client.db.settings.selectCrown.get(message.guild.id);
-        const oldCrownRole = message.guild.roles.cache.get(crownRoleId) || '`None`';
-        const crownChannel = message.guild.channels.cache.get(crownChannelId);
+            crown_schedule: crownSchedule,
+        } = this.client.db.settings.selectCrown.get(context.guild.id);
+        const oldCrownRole = context.guild.roles.cache.get(crownRoleId) || '`None`';
+        const crownChannel = context.guild.channels.cache.get(crownChannelId);
 
         // Get status
-        const oldStatus = message.client.utils.getStatus(crownRoleId, crownSchedule);
+        const oldStatus = this.client.utils.getStatus(crownRoleId, crownChannelId);
 
         // Trim message
         if (crownMessage && crownMessage.length > 1024) crownMessage = crownMessage.slice(0, 1021) + '...';
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Crown`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .addField('Channel', crownChannel?.toString() || '`None`', true)
-            .addField('Schedule', `\`${(crownSchedule) ? crownSchedule : 'None'}\``, true)
-            .addField('Message', message.client.utils.replaceCrownKeywords(crownMessage) || '`None`')
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .addFields([{name: 'Channel', value: crownChannel?.toString() || '`None`', inline: true}])
+            .addFields([{name: 'Schedule', value: `\`${crownSchedule ? crownSchedule : 'None'}\``, inline: true}])
+            .addFields([{name: 'Message', value: this.client.utils.replaceCrownKeywords(crownMessage) || '`None`'}])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: context.member.displayName, iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        // Clear role
-        if (args.length === 0) {
-            return message.channel.send({
-                embeds: [embed
-                    .spliceFields(0, 0, {
-                        name: 'Current Crown Role',
-                        value: `${oldCrownRole}` || '`None`',
-                        inline: true
-                    })
-                    .spliceFields(3, 0, {name: 'Status', value: `\`${oldStatus}\``})
-                    .setDescription(this.description)
+        if (!role) {
+            const payload = {
+                embeds: [
+                    embed
+                        .spliceFields(0, 0, {
+                            name: 'Current Crown Role', value: `${oldCrownRole}` || '`None`', inline: true,
+                        })
+                        .spliceFields(3, 0, {
+                            name: 'Status', value: `\`${oldStatus}\``,
+                        })
+                        .setDescription(this.description),
                 ]
-            });
+            };
+
+            return this.sendReply(context, payload);
         }
 
         // Update role
-        embed.setDescription(`The \`crown role\` was successfully updated. ${success}\nUse \`clearcrownrole\` to clear the current \`crown role\`.`)
-        const crownRole = await this.getRole(message, args[0])
-        if (!crownRole) return this.sendErrorMessage(message, 0, 'Please mention a role or provide a valid role ID');
-        message.client.db.settings.updateCrownRoleId.run(crownRole.id, message.guild.id);
+        const crownRole = isInteraction ? role : await this.getGuildRole(context.guild, role);
+        if (!crownRole) {
+            const payload = emojis.fail + ' Please mention a role or provide a valid role ID.';
+            return this.sendReply(context, payload);
+        }
+
+        this.client.db.settings.updateCrownRoleId.run(crownRole.id, context.guild.id);
 
         // Update status
-        const status = message.client.utils.getStatus(crownRole, crownSchedule);
-        const statusUpdate = (oldStatus != status) ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
+        const status = this.client.utils.getStatus(crownRole, crownChannelId);
+        const statusUpdate = oldStatus !== status ? `\`${oldStatus}\` ➔ \`${status}\`` : `\`${oldStatus}\``;
 
-        message.channel.send({
-            embeds: [embed
-                .spliceFields(0, 0, {name: 'Role', value: `${oldCrownRole} ➔ ${crownRole}`, inline: true})
-                .spliceFields(3, 0, {name: 'Status', value: statusUpdate})
+        const payload = {
+            embeds: [
+                embed.spliceFields(0, 0, {
+                    name: 'Role', value: `${oldCrownRole} ➔ ${crownRole}`, inline: true,
+                }).spliceFields(3, 0, {name: 'Status', value: statusUpdate})
+                    .setDescription(`The \`crown role\` was successfully updated. ${success}\nUse \`clearcrownrole\` to clear the current \`crown role\`.`),
             ]
-        });
+        };
+
+        await this.sendReply(context, payload);
 
         // Schedule crown role rotation
-        message.client.utils.scheduleCrown(message.client, message.guild);
+        this.client.utils.scheduleCrown(this.client, context.guild);
     }
 };

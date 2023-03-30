@@ -1,38 +1,52 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const emojis = require('../../utils/emojis.json')
+const {EmbedBuilder} = require('discord.js');
+const emojis = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class PointsCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'points',
-            aliases: ['bal', 'balance', 'money'],
+            aliases: ['bal', 'balance', 'money', 'coins'],
             usage: 'points <user mention/ID>',
-            description: 'Fetches a user\'s  points. If no user is given, your own points will be displayed.',
+            description:
+                'Fetches a user\'s  points. If no user is given, your own points will be displayed.',
             type: client.types.POINTS,
-            examples: ['points @split']
+            examples: ['points @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption(u => u.setName('user').setDescription('The user to get the points of').setRequired(false))
         });
     }
 
     async run(message, args) {
-        const prefix = message.client.db.settings.selectPrefix.pluck().get(message.guild.id)
-        const member = this.getMemberFromMention(message, args[0]) ||
-            message.guild.members.cache.get(args[0]) ||
-            message.member;
-        const points = message.client.db.users.selectPoints.pluck().get(member.id, message.guild.id);
-        const voted = await message.client.utils.checkTopGGVote(message.client, member.id);
-        const embed = new MessageEmbed()
-            .setTitle(`${member.displayName}'s ${emojis.point}`)
-            .setThumbnail(member.user.displayAvatarURL({dynamic: true}))
-            .setDescription(`${voted ? `${emojis.Voted}**+10%** Gambling Odds` : ''}`)
-            .addField('Member', member.toString(), true)
-            .addField(`Points ${emojis.point}`, `\`${points}\``, true)
+        const member = (await this.getGuildMember(message.guild, args[0])) || message.member;
+        if (!member) return this.sendErrorMessage(message, 0, 'Please mention a user or provide a valid user ID');
+
+        await this.handle(member, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || interaction.member;
+
+        await this.handle(member, interaction, true);
+    }
+
+    async handle(member, context) {
+        const prefix = this.client.db.settings.selectPrefix.pluck().get(context.guild.id);
+        const points = this.client.db.users.selectPoints.pluck().get(member.id, context.guild.id) || 0;
+        const voted = await this.client.utils.checkTopGGVote(this.client, member.id) || false;
+
+        const embed = new EmbedBuilder()
+            .setTitle(`${this.getUserIdentifier(member)}'s Points ${emojis.point}`)
+            .setThumbnail(this.getAvatarURL(member))
+            .addFields([{name: 'Member', value:  member.toString(), inline:  true}])
+            .addFields([{name: `Points ${emojis.point}`, value:  `\`${points}\``, inline:  true}])
             .setFooter({
-                text: `Boos your odds: ${prefix}vote`,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: `Boost your odds: ${prefix}vote`,
+                iconURL: this.getAvatarURL(context.author)
             })
-            .setTimestamp()
-            .setColor(member.displayHexColor);
-        message.channel.send({embeds: [embed]});
+            .setTimestamp();
+        if (voted) embed.setDescription(`${emojis.Voted}**+10%** Gambling Odds`);
+        await this.sendReply(context, {embeds: [embed]});
     }
 };

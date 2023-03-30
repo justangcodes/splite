@@ -1,5 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
+const {fail} = require('../../utils/emojis.json');
 
 module.exports = class CoinFlipCommand extends Command {
     constructor(client) {
@@ -8,24 +10,51 @@ module.exports = class CoinFlipCommand extends Command {
             aliases: ['cointoss', 'coin', 'flip'],
             usage: 'coinflip',
             description: 'Flips a coin.',
-            type: client.types.FUN
+            type: client.types.FUN,
+            slashCommand: new SlashCommandBuilder()
         });
     }
 
-    run(message, args) {
-        const n = Math.floor(Math.random() * 2);
-        let result;
-        if (n === 1) result = 'heads';
-        else result = 'tails';
-        const embed = new MessageEmbed()
-            .setTitle('½  Coinflip  ½')
-            .setDescription(`I flipped a coin for you, ${message.member}. It was **${result}**!`)
-            .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
-            })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        message.channel.send({embeds: [embed]});
+    async run(message) {
+        await this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    async handle(context) {
+        try {
+            const n = Math.floor(Math.random() * 2);
+            let result;
+            if (n === 1) result = 'heads';
+            else result = 'tails';
+            const embed = new EmbedBuilder()
+                .setTitle('½  Coinflip  ½')
+                .setDescription(
+                    `I flipped a coin for you, <@${context.author.id}>! It was **${result}**!`
+                )
+                .setFooter({
+                    text: this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author),
+                })
+                .setTimestamp();
+
+            const payload = {
+                embeds: [embed],
+            };
+            await this.sendReply(context, payload);
+        }
+        catch (err) {
+            const embed = new EmbedBuilder()
+                .setTitle('Error')
+                .setDescription(fail + ' ' + err.message)
+                .setColor('Red');
+            const payload = {
+                embeds: [embed]
+            };
+            await this.sendReply(context, payload);
+        }
     }
 };

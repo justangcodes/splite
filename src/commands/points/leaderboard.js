@@ -1,10 +1,9 @@
 const Command = require('../Command.js');
-const {ReactionMenu} = require('../ReactionMenu.js');
-const {MessageEmbed} = require('discord.js');
+const ButtonMenu = require('../ButtonMenu.js');
+const {EmbedBuilder, ButtonStyle, ActionRowBuilder, ButtonBuilder, ComponentType} = require('discord.js');
 const {oneLine} = require('common-tags');
-const emojis = require('../../utils/emojis.json')
-const {MessageActionRow} = require("discord.js");
-const {MessageButton} = require("discord.js");
+const emojis = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class LeaderboardCommand extends Command {
     constructor(client) {
@@ -18,85 +17,101 @@ module.exports = class LeaderboardCommand extends Command {
         The max leaderboard size is 25.
       `,
             type: client.types.POINTS,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS', 'ADD_REACTIONS'],
-            examples: ['leaderboard 20']
+            clientPermissions: ['SendMessages', 'EmbedLinks', 'AddReactions'],
+            examples: ['leaderboard 20'],
+            slashCommand: new SlashCommandBuilder().addIntegerOption(i => i.setName('members').setDescription('The number of members to show in the leaderboard.').setRequired(false))
         });
     }
 
-    async run(message, args) {
-        if (message.guild.members.cache.size === message.guild.memberCount)
-            console.log(`CACHE COMPLETE`);
+    run(message, args) {
+        let startingAmount = parseInt(args[0]);
 
-        let max = parseInt(args[0]);
-        if (!max || max < 0) max = 10;
-        else if (max > 25) max = 25;
-        let leaderboard = message.client.db.users.selectLeaderboard.all(message.guild.id);
-        const position = leaderboard.map(row => row.user_id).indexOf(message.author.id);
+        this.handle(startingAmount, message, false);
+    }
 
-        const members = [];
-        let count = 1;
-        for (const row of leaderboard) {
-            members.push(oneLine`**${count}.** ${await message.guild.members.cache.get(row.user_id)} - \`${row.points}\` ${emojis.point}`);
-            count++;
-        }
+    async interact(interaction) {
+        await interaction.deferReply();
+        const amount = interaction.options.getNumber('amount');
 
-        const embed = new MessageEmbed()
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+        this.handle(amount, interaction, true);
+    }
+
+    handle(max, context) {
+        if (!max || max < 0) max = 10; else if (max > 25) max = 25;
+        let leaderboard = this.client.db.users.selectLeaderboard.all(context.guild.id);
+        const position = leaderboard
+            .map((row) => row.user_id)
+            .indexOf(context.author.id);
+
+        const members = leaderboard.map((row, idx) => {
+            return oneLine`**${idx + 1}.** <@${row.user_id}> - \`${row.points}\` ${emojis.point}`;
+        });
+
+        const embed = new EmbedBuilder()
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
             .setFooter({
-                text: `${message.member.displayName}'s position: ${position + 1}`,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: `${context.member.displayName}'s position: ${position + 1}`,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-
+            .setTimestamp();
 
         if (members.length <= max) {
-            const range = (members.length == 1) ? '[1]' : `[1 - ${members.length}]`;
-            message.channel.send({
+            const range = members.length === 1 ? '[1]' : `[1 - ${members.length}]`;
+            const payload = {
                 embeds: [embed
                     .setTitle(`Points Leaderboard ${range}`)
-                    .setDescription(members.join('\n'))
-                ]
-            });
+                    .setDescription(members.join('\n')),]
+            };
 
-            // Reaction Menu
-        } else {
+            this.sendReply(context, payload);
+        }
+        else {
             embed
                 .setTitle('Points Leaderboard')
-                .setThumbnail(message.guild.iconURL({dynamic: true}))
+                .setThumbnail(context.guild.iconURL({dynamic: true}))
                 .setFooter({
-                    text: 'Expires after two minutes.\n' + `${message.member.displayName}'s position: ${position + 1}`,
-                    iconURL: message.author.displayAvatarURL({dynamic: true})
+                    text: 'Expires after two minutes.\n' + `${context.member.displayName}'s position: ${position + 1}`,
+                    iconURL: this.getAvatarURL(context.author),
                 });
 
-            const activityButton = new MessageButton().setCustomId(`activity`).setLabel(`Activity Leaderboard`).setStyle('SECONDARY')
-            activityButton.setEmoji(emojis.info.match(/(?<=\:)(.*?)(?=\>)/)[1].split(':')[1])
-            const moderationButton = message.member.permissions.has('VIEW_AUDIT_LOG') && new MessageButton().setCustomId('moderations').setLabel(`Moderation Leaderboard`).setStyle('SECONDARY')
+            const activityButton = new ButtonBuilder()
+                .setCustomId('activity')
+                .setLabel('Activity Leaderboard')
+                .setStyle(ButtonStyle.Secondary);
+            activityButton.setEmoji(emojis.info.match(/(?<=:)(.*?)(?=>)/)[1].split(':')[1]);
+            const moderationButton = context.member.permissions.has('ViewAuditLog') && new ButtonBuilder()
+                .setCustomId('moderations')
+                .setLabel('Moderation Leaderboard')
+                .setStyle(ButtonStyle.Secondary);
 
-            const row = new MessageActionRow();
-            row.addComponents(activityButton)
+            const row = new ActionRowBuilder();
+            row.addComponents(activityButton);
             if (moderationButton) {
-                moderationButton.setEmoji(emojis.mod.match(/(?<=\:)(.*?)(?=\>)/)[1].split(':')[1])
-                row.addComponents(moderationButton)
+                moderationButton.setEmoji(emojis.mod.match(/(?<=:)(.*?)(?=>)/)[1].split(':')[1]);
+                row.addComponents(moderationButton);
             }
 
-            new ReactionMenu(message.client, message.channel, message.member, embed, members, max, null, null, 120000, [row], msg => {
-                const filter = (button) => button.user.id === message.author.id;
-                const collector = msg.createMessageComponentCollector({
-                    filter,
-                    componentType: 'BUTTON',
-                    time: 120000,
-                    dispose: true
+            this.sendReply(context, 'Leaderboard Generated!').then(() => {
+                new ButtonMenu(this.client, context.channel, context.member, embed, members, max, null, 120000, [row], (msg) => {
+                    const filter = (button) => button.user.id === context.author.id;
+                    const collector = msg.createMessageComponentCollector({
+                        filter, componentType: ComponentType.Button, time: 120000, dispose: true,
+                    });
+                    collector.on('collect', (b) => {
+                        if (b.customId === 'activity') {
+                            this.client.commands
+                                .get('activity')
+                                .run(context, ['all']);
+                            msg.delete();
+                        }
+                        else if (b.customId === 'moderations') {
+                            this.client.commands
+                                .get('modactivity')
+                                .run(context, []);
+                            msg.delete();
+                        }
+                    });
                 });
-                collector.on('collect', b => {
-                    if (b.customId === 'activity') {
-                        message.client.commands.get('activity').run(message, ['all'])
-                        msg.delete()
-                    } else if (b.customId === 'moderations') {
-                        message.client.commands.get('modactivity').run(message, [])
-                        msg.delete()
-                    }
-                })
             });
         }
     }

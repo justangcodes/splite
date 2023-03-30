@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const emojis = require('../../utils/emojis.json')
+const {EmbedBuilder} = require('discord.js');
+const emojis = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class TotalPointsCommand extends Command {
     constructor(client) {
@@ -8,28 +9,46 @@ module.exports = class TotalPointsCommand extends Command {
             name: 'totalpoints',
             aliases: ['totalp', 'tp'],
             usage: 'totalpoints <user mention/ID>',
-            description: 'Fetches a user\'s total points. If no user is given, your own total points will be displayed.',
+            description:
+                'Fetches a user\'s total points. If no user is given, your own total points will be displayed.',
             type: client.types.POINTS,
-            examples: ['totalpoints @split']
+            examples: ['totalpoints @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption(u => u.setName('user').setDescription('The user to get the total points of.'))
         });
     }
 
-    run(message, args) {
-        const member = this.getMemberFromMention(message, args[0]) ||
-            message.guild.members.cache.get(args[0]) ||
-            message.member;
-        const points = message.client.db.users.selectTotalPoints.pluck().get(member.id, message.guild.id);
-        const embed = new MessageEmbed()
-            .setTitle(`${member.displayName}'s Total Points`)
-            .setThumbnail(member.user.displayAvatarURL({dynamic: true}))
-            .addField('Member', message.member.toString(), true)
-            .addField(`Points ${emojis.point}`, `\`${points}\``, true)
+    async run(message, args) {
+        if (args.length === 0) {
+            return message.reply(`${emojis.fail} You need to specify a user to get the total points of.`);
+        }
+        let target = await this.getGuildMember(message.guild, args[0]);
+        if (!target) {
+            return message.reply(`${emojis.fail} I couldn't find that user.`);
+        }
+        this.handle(target, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const target = interaction.options.getUser('user') || interaction.author;
+        this.handle(target, interaction, true);
+    }
+
+    handle(member, context) {
+        const points = this.client.db.users.selectTotalPoints
+            .pluck()
+            .get(member.id, context.guild.id);
+        const embed = new EmbedBuilder()
+            .setTitle(`${this.getUserIdentifier(member)}'s Total Points`)
+            .setThumbnail(this.getAvatarURL(member))
+            .addFields([{name: 'Member', value:  member.toString(), inline:  true}])
+            .addFields([{name: `Points ${emojis.point}`, value:  `\`${points}\``, inline:  true}])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(member.displayHexColor);
-        message.channel.send({embeds: [embed]});
+            .setTimestamp();
+
+        this.sendReply(context, {embeds: [embed]});
     }
 };

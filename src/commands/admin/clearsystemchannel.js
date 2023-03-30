@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearSystemChannelCommand extends Command {
     constructor(client) {
@@ -13,28 +13,51 @@ module.exports = class clearSystemChannelCommand extends Command {
         Clears the system text channel for your server.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearsystemchannel']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearsystemchannel'],
         });
     }
 
-    run(message, args) {
-        const systemChannelId = message.client.db.settings.selectSystemChannelId.pluck().get(message.guild.id);
-        const oldSystemChannel = message.guild.channels.cache.get(systemChannelId) || '`None`';
-        const embed = new MessageEmbed()
+    run(message) {
+        this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const systemChannelId = this.client.db.settings.selectSystemChannelId
+            .pluck()
+            .get(context.guild.id);
+        const oldSystemChannel =
+            context.guild.channels.cache.get(systemChannelId) || '`None`';
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`system channel\` was successfully cleared. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`system channel\` was successfully cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        message.client.db.settings.updateSystemChannelId.run(null, message.guild.id);
-        return message.channel.send({embeds: [embed.addField('System Channel', `${oldSystemChannel} ➔ \`None\``)]});
+        this.client.db.settings.updateSystemChannelId.run(
+            null,
+            context.guild.id
+        );
 
+        const payload = {
+            embeds: [embed.addFields([{
+                name: 'System Channel',
+                value: `${oldSystemChannel} ➔ \`None\``
+            }]),],
+        };
+
+        this.sendReply(context, payload);
     }
 };

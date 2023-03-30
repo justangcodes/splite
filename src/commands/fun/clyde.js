@@ -1,6 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
+const {AttachmentBuilder} = require('discord.js');
+
 
 module.exports = class clydeCommand extends Command {
     constructor(client) {
@@ -10,26 +10,30 @@ module.exports = class clydeCommand extends Command {
             usage: 'clyde <text>',
             description: 'Generates a clyde image with provided text',
             type: client.types.FUN,
-            examples: [`clyde ${client.name} is the best bot!`]
+            examples: [`clyde ${client.name} is the best bot!`],
         });
     }
 
     async run(message, args) {
+        if (!args[0]) return message.reply({embeds: [this.createHelpEmbed(message, 'Clyde Bot Message', this)]});
 
-        if (!args[0]) return this.sendErrorMessage(message, 0, 'Please provide some text');
+        await this.handle(args.join(' '), message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        const text = interaction.options.getString('text') || `${this.client.name}  is the best bot!`;
+        await this.handle(text, interaction, true);
+    }
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const buffer = await msg.client.nekoApi.generate("clyde", {text: `${args.join(' ')}`})
-                const attachment = new MessageAttachment(buffer, "clyde.png");
+    async handle(text, context) {
+        const buffer = await context.client.nekoApi.generate('clyde', {
+            text: text
+        });
+        const attachment = new AttachmentBuilder(buffer, { name:  'clyde.png' });
 
-                await message.channel.send({files: [attachment]})
-                await msg.delete()
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
-
+        const payload = {
+            files: [attachment],
+        }; await this.sendReply(context, payload);
     }
 };

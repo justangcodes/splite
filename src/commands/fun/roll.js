@@ -1,5 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
+
 
 module.exports = class RollCommand extends Command {
     constructor(client) {
@@ -7,27 +9,41 @@ module.exports = class RollCommand extends Command {
             name: 'roll',
             aliases: ['dice', 'r'],
             usage: 'roll <dice sides>',
-            description: 'Rolls a dice with the specified number of sides. Will default to 6 sides if no number is given.',
+            description:
+                'Rolls a dice with the specified number of sides. Will default to 6 sides if no number is given.',
             type: client.types.FUN,
-            examples: ['roll 20']
+            examples: ['roll 20'],
+            slashCommand: new SlashCommandBuilder().addIntegerOption((i) => i.setName('sides').setRequired(false).setDescription('The number of sides on the dice'))
         });
     }
 
-    run(message, args) {
-        let limit = args[0];
-        if (!limit) limit = 6;
-        const n = Math.floor(Math.random() * limit + 1);
-        if (!n || limit <= 0)
-            return this.sendErrorMessage(message, 0, 'Please provide a valid number of dice sides');
-        const embed = new MessageEmbed()
-            .setTitle('🎲  Dice Roll  🎲')
-            .setDescription(`${message.member}, you rolled a **${n}**!`)
-            .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
-            })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        message.channel.send({embeds: [embed]});
+    async run(message, args) {
+        await this.handle(args[0] || 6, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const sides = interaction.options.getInteger('sides') || 6;
+        this.handle(sides, interaction, true);
+    }
+
+    handle(sides, context) {
+        const n = Math.floor(Math.random() * sides + 1);
+        if (!n || sides <= 0) {
+            const payload = 'Invalid number of sides - must be greater than 0';
+            return this.sendReply(context, payload);
+        }
+        const payload = {
+            embeds: [new EmbedBuilder()
+                .setTitle('🎲  Dice Roll  🎲')
+                .setDescription(`${context.author}, you rolled a **${n}**!`)
+                .setFooter({
+                    text: this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author, 'png'),
+                })
+                .setTimestamp()]
+        };
+
+        this.sendReply(context, payload);
     }
 };

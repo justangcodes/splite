@@ -1,90 +1,138 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {stripIndent} = require('common-tags');
-const emojis = require('../../utils/emojis.json')
-
-const limit = 99999999;
+const {EmbedBuilder} = require('discord.js');
+const emojis = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class gambleCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'gamble',
-            aliases: ['spin', 'coinflip', 'heads', 'tails', 'roll'],
-            usage: 'gamble <point count>',
+            aliases: ['spin', 'heads', 'tails', 'roll'],
+            usage: 'gamble <point count / "all">',
             description: 'Gamble your points.',
             type: client.types.POINTS,
             examples: ['gamble 1000'],
-            exclusive: true
+            exclusive: true,
+            slashCommand: new SlashCommandBuilder()
+                .addIntegerOption(i => i.setName('amount').setDescription('The amount of points to gamble.').setDescription('The amount of points to gamble.'))
         });
     }
 
-    async run(message, args) {
-        const prefix = message.client.db.settings.selectPrefix.pluck().get(message.guild.id)
-
+    run(message, args) {
         let amount = parseInt(args[0]);
-        const points = message.client.db.users.selectPoints.pluck().get(message.author.id, message.guild.id);
+        this.handle(amount, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const amount = interaction.options.getInteger('amount');
+        await this.handle(amount, interaction, true);
+    }
+
+    async handle(amount, context, isInteraction) {
+        const points = this.client.db.users.selectPoints
+            .pluck()
+            .get(context.author.id, context.guild.id);
+
         if (isNaN(amount) === true || !amount) {
-            if (args[0] === 'all') amount = points
+            if (amount === 'all' || amount === 'max') amount = Math.min(points, this.client.config.stats.gambling.limit);
             else {
-                this.done(message.author.id)
-                return this.sendErrorMessage(message, 0, `Please provide a valid point count`);
+                this.done(context.author.id);
+
+                const payload = `${emojis.fail} Please provide a valid amount of points to gamble.`;
+                return this.sendReplyAndDelete(context, payload, isInteraction, 5000);
             }
         }
 
         if (amount < 0 || amount > points) {
-            this.done(message.author.id)
-            return message.reply(`${emojis.nep} Please provide an amount you currently have! You have **${points} points** ${emojis.point}`);
+            this.done(context.author.id);
+
+            const payload = `${emojis.nep} Please provide an amount you currently have! You have **${points} points** ${emojis.point}`;
+            await this.sendReplyAndDelete(context, payload);
+            return;
         }
-        if (amount > limit) {
-            this.done(message.author.id)
-            return message.reply(`${emojis.fail} You can't bet more than ${limit} points ${emojis.point} at a time. Please try again!`);
+        if (amount > this.client.config.stats.gambling.limit) {
+            this.done(context.author.id);
+
+            const payload = `${emojis.fail} You can't bet more than ${this.client.config.stats.gambling.limit} points ${emojis.point} at a time. Please try again!`;
+            await this.sendReplyAndDelete(context, payload);
+            return;
         }
 
-        const modifier = (await message.client.utils.checkTopGGVote(message.client, message.author.id) ? 10 : 0);
-        const embed = new MessageEmbed()
-            .setTitle(`${modifier ? emojis.Voted : ''}${message.author.username} gambling ${amount} points ${emojis.point}`)
-            .setDescription(`${emojis.point} **Rolling** ${emojis.point}\n${emojis.dices}${emojis.dices}${emojis.dices}`)
+        const modifier = (await this.client.utils.checkTopGGVote(this.client, context.author.id))
+            ? this.client.config.votePerks.gamblingWinOdds - this.client.config.stats.gambling.winOdds
+            : 0;
+        const embed = new EmbedBuilder()
+            .setTitle(
+                `${modifier ? emojis.Voted : ''}${this.getUserIdentifier(context.author)} gambling ${amount} points ${emojis.point}`
+            )
+            .setDescription(
+                `${emojis.point} **Rolling** ${emojis.point}\n${emojis.dices}${emojis.dices}${emojis.dices}`
+            )
             .setFooter({
                 text: `Your points: ${points}.`,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
-            })
+                iconURL: this.getAvatarURL(context.author)
+            });
 
-        message.channel.send({embeds: [embed]}).then(msg => {
-            setTimeout(async () => {
-                let odds = message.client.odds.get(message.author.id) || {lose: 45, win: 55}
-                odds.win += modifier
-                odds.lose -= modifier
+        const payload = {embeds: [embed]};
+        let msg;
+        try {
+            msg = await this.sendReply(context, payload);
+        }
+        catch (e) {
+            this.done(context.author.id);
+            return;
+        }
 
-                const outcome = message.client.utils.weightedRandom(odds)
-                //Loss
-                if (outcome === "lose") {
-                    const embed = new MessageEmbed()
-                        .setTitle(`${modifier ? emojis.Voted : ''}${message.author.username} gambling ${amount} Points ${emojis.point}`)
-                        .setDescription(`${emojis.fail} You lost! **You now have ${points - amount}** ${emojis.point}\n\n${modifier ? '' : emojis.Voted + `Get a +10% boost to your odds: \`${prefix}vote\``}`)
-                        .setFooter({
-                            text: `Your points: ${points - amount}.`,
-                            iconURL: message.author.displayAvatarURL({dynamic: true})
-                        })
-                    message.client.db.users.updatePoints.run({points: -amount}, message.author.id, message.guild.id);
-                    msg.edit({embeds: [embed]})
-                }
-                //Win
-                else {
-                    const embed = new MessageEmbed()
-                        .setTitle(`${modifier ? emojis.Voted : ''}${message.author.username} gambling ${amount} Points ${emojis.point}`)
-                        .setDescription(`🎉 You Won! **You now have ${points + amount}** ${emojis.point}`)
-                        .setFooter({
-                            text: `Your points: ${points + amount}.`,
-                            iconURL: message.author.displayAvatarURL({dynamic: true})
-                        })
-                    message.client.db.users.updatePoints.run({points: amount}, message.author.id, message.guild.id);
-                    msg.edit({embeds: [embed]})
-                }
-                this.done(message.author.id)
-            }, 3000)
-        }).catch(e => {
-            console.log(e)
-            this.done(message.author.id)
-        })
+
+        setTimeout(() => {
+            let odds = this.client.odds.get(context.author.id) || {
+                win: this.client.config.stats.gambling.winOdds,
+                lose: 1 - this.client.config.stats.gambling.winOdds,
+            };
+            odds.win += modifier;
+            odds.lose -= modifier;
+
+            const outcome = this.client.utils.weightedRandom(odds);
+
+            //Loss
+            if (outcome === 'lose') {
+                const embed = new EmbedBuilder()
+                    .setTitle(
+                        `${modifier ? emojis.Voted : ''}${this.getUserIdentifier(context.author)} gambling ${amount} Points ${emojis.point}`
+                    )
+                    .setDescription(
+                        `${emojis.fail} You lost! **You now have ${points - amount}** ${emojis.point}\n\n
+                        ${modifier ? '' : `${emojis.Voted} Use the \`vote\` command to get a +10% boost to your odds`}`
+                    )
+                    .setFooter({
+                        text: `Your points: ${points - amount}.`,
+                        iconURL: this.getAvatarURL(context.author)
+                    });
+                this.client.db.users.updatePoints.run(
+                    {points: -amount},
+                    context.author.id,
+                    context.guild.id
+                );
+                msg.edit({embeds: [embed]});
+            }
+            //Win
+            else {
+                const embed = new EmbedBuilder()
+                    .setTitle(`${modifier ? emojis.Voted : ''}${this.getUserIdentifier(context.author)} gambling ${amount} Points ${emojis.point}`)
+                    .setDescription(`🎉 You Won! **You now have ${points + amount}** ${emojis.point}`)
+                    .setFooter({
+                        text: `Your points: ${points + amount}.`,
+                        iconURL: this.getAvatarURL(context.author)
+                    });
+                this.client.db.users.updatePoints.run(
+                    {points: amount},
+                    context.author.id,
+                    context.guild.id
+                );
+                msg.edit({embeds: [embed]});
+            }
+            this.done(context.author.id);
+        }, 5000);
     }
 };

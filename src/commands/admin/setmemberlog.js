@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {EmbedBuilder, ChannelType} = require('discord.js');
+const {success, fail} = require('../../utils/emojis.json');
+const {oneLine} = require('common-tags');
 
 module.exports = class SetMemberLogCommand extends Command {
     constructor(client) {
@@ -14,37 +14,71 @@ module.exports = class SetMemberLogCommand extends Command {
         \nUse \`clearmemberlog\` to clear the current \`member log\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setmemberlog #member-log', 'clearmemberlog']
+            userPermissions: ['ManageGuild'],
+            examples: ['setmemberlog #member-log', 'clearmemberlog'],
         });
     }
 
     run(message, args) {
-        const memberLogId = message.client.db.settings.selectMemberLogId.pluck().get(message.guild.id);
-        const oldMemberLog = message.guild.channels.cache.get(memberLogId) || '`None`';
-        const embed = new MessageEmbed()
+        this.handle(args.join(' '), message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const channel = interaction.options.getChannel('channel');
+        this.handle(channel, interaction, true);
+    }
+
+    async handle(channel, context, isInteraction) {
+        const memberLogId = this.client.db.settings.selectMemberLogId
+            .pluck()
+            .get(context.guild.id);
+        const oldMemberLog =
+            context.guild.channels.cache.get(memberLogId) || '`None`';
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Logging`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
 
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        // Clear if no args provided
-        if (args.length === 0) {
-            return message.channel.send({embeds: [embed.addField('Current Member Log', `${oldMemberLog}` || '`None`').setDescription(this.description)]});
+        // Display current member log
+        if (!channel) {
+            const payload = ({
+                embeds: [
+                    embed
+                        .addFields([{name: 'Current Member Log', value: `${oldMemberLog}` || '`None`'}])
+                        .setDescription(this.description),
+                ],
+            });
+
+            this.sendReply(context, payload);
+            return;
         }
 
-        embed.setDescription(`The \`member log\` was successfully updated. ${success}\nUse \`clearmemberlog\` to clear the current \`member log\`.`)
-        const memberLog = this.getChannelFromMention(message, args[0]) || message.guild.channels.cache.get(args[0]);
-        if (!memberLog || memberLog.type != 'GUILD_TEXT' || !memberLog.viewable)
-            return this.sendErrorMessage(message, 0, stripIndent`
-        Please mention an accessible text channel or provide a valid text channel ID
-      `);
-        message.client.db.settings.updateMemberLogId.run(memberLog.id, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Member Log', `${oldMemberLog} ➔ ${memberLog}`)]});
+        channel = isInteraction ? channel : this.getChannelFromMention(context, channel) || context.guild.channels.cache.get(channel);
+
+        if (!channel || channel.type != ChannelType.GuildText || !channel.viewable) {
+            const payload = `${fail} Please mention an accessible text channel or provide a valid text channel ID.`;
+
+            this.sendReply(context, payload);
+            return;
+        }
+
+        this.client.db.settings.updateMemberLogId.run(channel.id, context.guild.id);
+
+        const payload = ({
+            embeds: [
+                embed.addFields([{name: 'Member Log', value: `${oldMemberLog} ➔ ${channel}`}])
+                    .setDescription(
+                        `The \`member log\` was successfully updated. ${success}\nUse \`clearmemberlog\` to clear the current \`member log\`.`
+                    ),
+            ],
+        });
+
+        await this.sendReplyAndDelete(context, payload);
     }
 };

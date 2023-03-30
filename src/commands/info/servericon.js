@@ -1,5 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class ServerIconCommand extends Command {
     constructor(client) {
@@ -8,20 +9,31 @@ module.exports = class ServerIconCommand extends Command {
             aliases: ['icon', 'i', 'serveravatar', 'serverav'],
             usage: 'servericon',
             description: 'Displays the server\'s icon.',
-            type: client.types.INFO
+            type: client.types.INFO,
+            slashCommand: new SlashCommandBuilder()
         });
     }
 
-    run(message, args) {
-        const embed = new MessageEmbed()
-            .setTitle(`${message.guild.name}'s Icon`)
-            .setImage(message.guild.iconURL({dynamic: true, size: 512}))
+    run(message) {
+        this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const embed = new EmbedBuilder()
+            .setTitle(`${context.guild.name}'s Icon`)
+            .setImage(context.guild.iconURL({dynamic: true, size: 512}))
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        message.channel.send({embeds: [embed]});
+            .setTimestamp();
+
+        const payload = {embeds: [embed]};
+        this.sendReply(context, payload);
     }
 };

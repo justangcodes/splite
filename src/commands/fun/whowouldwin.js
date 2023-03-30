@@ -1,7 +1,8 @@
 const Command = require('../Command.js');
-const {MessageEmbed, MessageAttachment} = require('discord.js');
-const {fail, load} = require("../../utils/emojis.json")
-const fetch = require('node-fetch')
+const {AttachmentBuilder} = require('discord.js');
+
+const fetch = require('node-fetch');
+const {SlashCommandBuilder} = require('discord.js');
 module.exports = class whowouldwinCommand extends Command {
     constructor(client) {
         super(client, {
@@ -10,28 +11,49 @@ module.exports = class whowouldwinCommand extends Command {
             usage: 'whowouldwin <user mention/id>',
             description: 'Generates a whowouldwin image',
             type: client.types.FUN,
-            examples: ['whowouldwin @split']
+            examples: ['whowouldwin @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption((u) => u.setName('user').setRequired(false).setDescription('Opponent to whowouldwin with')).addUserOption((u) => u.setName('user2').setRequired(false).setDescription('The user to whowouldwin with')),
         });
     }
 
     async run(message, args) {
-        const member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0]) || message.guild.members.cache.filter(m => !m.user.bot).random();
-        const member2 = await this.getMemberFromMention(message, args[1]) || await message.guild.members.cache.get(args[1]) || message.author;
+        const member =
+            await this.getGuildMember(message.guild, args[0] || this.client.db.users.getRandom.get(message.guild.id).user_id);
+        const member2 =
+            (await this.getGuildMember(message.guild, args[1])) || message.author;
 
-        message.channel.send({embeds: [new MessageEmbed().setDescription(`${load} Loading...`)]}).then(async msg => {
-            try {
-                const res = await fetch(encodeURI(`https://nekobot.xyz/api/imagegen?type=whowouldwin&user1=${this.getAvatarURL(member)}&user2=${this.getAvatarURL(member2)}`));
-                const json = await res.json();
-                const attachment = new MessageAttachment(json.message, "whowouldwin.png");
+        if (!member || !member2) return this.sendErrorMessage(message, 'Could not find the user you specified.');
 
-                const m = await message.channel.send({files: [attachment]})
-                if (m.channel.permissionsFor(m.guild.me).has('ADD_REACTIONS'))
-                    m.react('👈').then(() => m.react('👉'))
+        await this.handle(member, member2, message);
+    }
 
-                await msg.delete()
-            } catch (e) {
-                await msg.edit({embeds: [new MessageEmbed().setDescription(`${fail} ${e}`)]})
-            }
-        })
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || await this.getGuildMember(interaction.guild, this.client.db.users.getRandom.get(interaction.guild.id).user_id);
+        const member2 = interaction.options.getUser('user2') || interaction.author;
+        await this.handle(member, member2, interaction);
+    }
+
+    async handle(member, member2, context) {
+        const res = await fetch(
+            encodeURI(
+                `https://nekobot.xyz/api/imagegen?type=whowouldwin&user1=${this.getAvatarURL(
+                    member
+                )}&user2=${this.getAvatarURL(member2)}`
+            )
+        );
+        const json = await res.json();
+        const attachment = new AttachmentBuilder(
+            json.message,
+            'whowouldwin.png'
+        );
+        const payload = {
+            content: `<@${member.id}> **VS** <@${member2.id}>`,
+            files: [attachment],
+        };
+        this.sendReply(context, payload).then(m => {
+            if (m.channel.permissionsFor(m.guild.members.me).has('AddReactions'))
+                m.react('👈').then(() => m.react('👉'));
+        });
     }
 };

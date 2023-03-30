@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 const {oneLine} = require('common-tags');
 
@@ -14,35 +14,64 @@ module.exports = class SetAutoRoleCommand extends Command {
         \nUse \`clearautorole\` to clear the current \`auto role\`.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['setautorole @Member', 'clearautorole']
+            userPermissions: ['ManageGuild'],
+            examples: ['setautorole @Member', 'clearautorole'],
         });
     }
 
-    async run(message, args) {
-        const autoRoleId = message.client.db.settings.selectAutoRoleId.pluck().get(message.guild.id);
-        const oldAutoRole = message.guild.roles.cache.find(r => r.id === autoRoleId) || '`None`';
+    run(message, args) {
+        this.handle(args.join(' '), message, false);
+    }
 
-        const embed = new MessageEmbed()
+    async interact(interaction) {
+        await interaction.deferReply();
+        const role = interaction.options.getRole('role');
+        await this.handle(role, interaction, true);
+    }
+
+    async handle(role, context, isInteraction) {
+        const autoRoleId = this.client.db.settings.selectAutoRoleId
+            .pluck()
+            .get(context.guild.id);
+        const oldAutoRole =
+            context.guild.roles.cache.find((r) => r.id === autoRoleId) || '`None`';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        if (args.length === 0) {
-            return message.channel.send({embeds: [embed.addField('Current Auto Role', `${oldAutoRole}` || '`None`').setDescription(this.description)]});
+        if (!role) {
+            const payload = ({
+                embeds: [
+                    embed
+                        .addFields([{name: 'Current Auto Role', value: `${oldAutoRole}` || '`None`'}])
+                        .setDescription(this.description),
+                ],
+            });
+
+
+            this.sendReply(context, payload);
         }
 
         // Update role
-        embed.setDescription(`The \`auto role\` was successfully updated. ${success}\nUse \`clearautorole\` to clear the current \`auto role\`.`)
-        const autoRole = await this.getRole(message, args[0]);
-        if (!autoRole) return this.sendErrorMessage(message, 0, `Failed to find that role (${args[0]}), try using a role ID`);
-        message.client.db.settings.updateAutoRoleId.run(autoRole.id, message.guild.id);
-        message.channel.send({embeds: [embed.addField('Auto Role', `${oldAutoRole} ➔ ${autoRole}`)]});
+        role = isInteraction ? role : await this.getGuildRole(context.guild, role);
+
+        this.client.db.settings.updateAutoRoleId.run(
+            role.id,
+            context.guild.id
+        );
+
+        const payload = ({
+            embeds: [embed.addFields([{name: 'Auto Role', value: `${oldAutoRole} ➔ ${role}`}])
+                .setDescription(`The \`auto role\` was successfully updated. ${success}\nUse \`clearautorole\` to clear the current \`auto role\`.`)],
+        });
+
+        await this.sendReply(context, payload);
     }
 };

@@ -1,34 +1,58 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {pong} = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class PingCommand extends Command {
     constructor(client) {
         super(client, {
             name: 'ping',
             usage: 'ping',
-            description: `Gets ${client.name}\'s current latency and API latency.`,
-            type: client.types.INFO
+            description: `Gets ${client.name}'s current latency and API latency.`,
+            type: client.types.INFO,
+            slashCommand: new SlashCommandBuilder()
         });
     }
 
-    async run(message, args) {
-        const embed = new MessageEmbed()
-            .setDescription('`Pinging...`')
-            .setColor(message.guild.me.displayHexColor);
-        const msg = await message.channel.send({embeds: [embed]});
-        const timestamp = (message.editedTimestamp) ? message.editedTimestamp : message.createdTimestamp; // Check if edited
-        const latency = `\`\`\`ini\n[ ${Math.floor(msg.createdTimestamp - timestamp)}ms ]\`\`\``;
-        const apiLatency = `\`\`\`ini\n[ ${Math.round(message.client.ws.ping)}ms ]\`\`\``;
-        embed.setTitle(`Pong!  ${pong}`)
-            .setDescription('')
-            .addField('Latency', latency, true)
-            .addField('API Latency', apiLatency, true)
+    run(message) {
+        this.handle(message);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        await this.handle(interaction);
+    }
+
+    async handle(context) {
+        const embed = new EmbedBuilder()
+            .setDescription('`Pinging...`');
+
+        let msg;
+        let payload = {embeds: [embed]};
+        msg = await this.sendReply(context, payload);
+
+        const timestamp = context.editedTimestamp
+            ? context.editedTimestamp
+            : context.createdTimestamp; // Check if edited
+        const latency = `\`\`\`ini\n[ ${Math.floor(
+            msg.createdTimestamp - timestamp
+        )}ms ]\`\`\``;
+        const apiLatency = `\`\`\`ini\n[ ${Math.round(
+            this.client.ws.ping
+        )}ms ]\`\`\``;
+
+        embed
+            .setTitle(`Pong!  ${pong}`)
+            .setDescription(null)
+            .addFields([{name: 'Latency', value:  latency, inline:  true}])
+            .addFields([{name: 'API Latency', value:  apiLatency, inline:  true}])
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
             .setTimestamp();
-        msg.edit({embeds: [embed]});
+
+        payload = {embeds: [embed]};
+        msg.edit(payload);
     }
 };

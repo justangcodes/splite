@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
 
 module.exports = class ClearAdminRoleCommand extends Command {
@@ -10,27 +10,44 @@ module.exports = class ClearAdminRoleCommand extends Command {
             usage: 'clearadminrole',
             description: 'Clears the `admin role` for your server.',
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearadminrole']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearadminrole'],
         });
     }
 
-    run(message, args) {
-        const adminRoleId = message.client.db.settings.selectAdminRoleId.pluck().get(message.guild.id);
-        const oldAdminRole = message.guild.roles.cache.find(r => r.id === adminRoleId) || '`None`';
+    run(message) {
+        this.handle(message, false);
+    }
 
-        const embed = new MessageEmbed()
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const adminRoleId = this.client.db.settings.selectAdminRoleId
+            .pluck()
+            .get(context.guild.id);
+        const oldAdminRole =
+            context.guild.roles.cache.find((r) => r.id === adminRoleId) ||
+            '`None`';
+
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `System`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`admin role\` was successfully cleared. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`admin role\` was successfully cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL({dynamic: true})
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
-        message.client.db.settings.updateAdminRoleId.run(null, message.guild.id);
-        return message.channel.send({embeds: [embed.addField('Admin Role', `${oldAdminRole} ➔ \`None\``)]});
+        this.client.db.settings.updateAdminRoleId.run(null, context.guild.id);
+
+        const payload = {embeds: [embed.addFields([{name: 'Admin Role', value: `${oldAdminRole} ➔ \`None\``}])],};
+
+        this.sendReply(context, payload);
     }
 };

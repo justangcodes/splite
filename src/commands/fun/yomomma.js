@@ -1,12 +1,14 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const fetch = require('node-fetch');
 const {oneLine} = require('common-tags');
+const {SlashCommandBuilder} = require('discord.js');
+const {fail} = require('../../utils/emojis.json');
 
 module.exports = class YoMommaCommand extends Command {
     constructor(client) {
         super(client, {
-            name: 'yomomma',
+            name: 'yomamma',
             aliases: ['yourmom', 'yomamma', 'yomama', 'ym'],
             usage: 'yomomma [user mention/ID]',
             description: oneLine`
@@ -14,32 +16,54 @@ module.exports = class YoMommaCommand extends Command {
         If no user is given, then the joke will be directed at you!
       `,
             type: client.types.FUN,
-            examples: ['yomomma @split']
+            examples: ['yomomma @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption(u => u.setName('user').setRequired(false).setDescription('The user to joke about')),
         });
     }
 
     async run(message, args) {
-        const member = this.getMemberFromMention(message, args[0]) ||
-            message.guild.members.cache.get(args[0]) ||
-            message.member;
+        const member = await this.getGuildMember(message.guild, args[0]);
+
+        await this.handle(member, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user');
+        await this.handle(member, interaction, true);
+    }
+
+    async handle(member, context) {
         try {
             const res = await fetch('https://api.yomomma.info');
             let joke = (await res.json()).joke;
             joke = joke.charAt(0).toLowerCase() + joke.slice(1);
-            if (!joke.endsWith('!') && !joke.endsWith('.') && !joke.endsWith('"')) joke += '!';
-            const embed = new MessageEmbed()
-                .setTitle('🍼  Yo Momma  🍼')
-                .setDescription(`${member}, ${joke}`)
-                .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
-                })
-                .setTimestamp()
-                .setColor(message.guild.me.displayHexColor);
-            message.channel.send({embeds: [embed]});
-        } catch (err) {
-            message.client.logger.error(err.stack);
-            this.sendErrorMessage(message, 1, 'Please try again in a few seconds', err.message);
+            if (!joke.endsWith('!') && !joke.endsWith('.') && !joke.endsWith('"'))
+                joke += '!';
+
+            const payload = {
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('🍼  Yo Mamma  🍼')
+                        .setDescription(member ? `${member}, ${joke}` : `${joke}`)
+                        .setFooter({
+                            text: this.getUserIdentifier(context.author),
+                            iconURL: this.getAvatarURL(context.author),
+                        })
+                        .setTimestamp()
+                ]
+            };
+
+            await this.sendReply(context, payload);
+        }
+        catch (err) {
+            const payload = {
+                embeds: [new EmbedBuilder()
+                    .setTitle('Error')
+                    .setDescription(fail + ' ' + err.message)
+                    .setColor('Red')]
+            };
+            await this.sendReply(context, payload);
         }
     }
 };

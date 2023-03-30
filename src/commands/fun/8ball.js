@@ -1,5 +1,6 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
+const {SlashCommandBuilder} = require('discord.js');
 const answers = [
     'It is certain.',
     'It is decidedly so.',
@@ -20,7 +21,7 @@ const answers = [
     'My reply is no.',
     'My sources say no.',
     'Outlook not so good.',
-    'Very doubtful.'
+    'Very doubtful.',
 ];
 
 module.exports = class EightBallCommand extends Command {
@@ -31,23 +32,40 @@ module.exports = class EightBallCommand extends Command {
             usage: '8ball <question>',
             description: 'Asks the Magic 8-Ball for some psychic wisdom.',
             type: client.types.FUN,
-            examples: ['8ball Am I going to win the lottery?']
+            examples: ['8ball Am I going to win the lottery?'],
+            slashCommand: new SlashCommandBuilder().addStringOption((o) => o.setName('question').setRequired(true).setDescription('The question you want to ask')),
         });
     }
 
     run(message, args) {
-        const question = args.join(' ');
-        if (!question) return this.sendErrorMessage(message, 0, 'Please provide a question to ask');
-        const embed = new MessageEmbed()
-            .setTitle('🎱  The Magic 8-Ball  🎱')
-            .addField('Question', question)
-            .addField('Answer', `${answers[Math.floor(Math.random() * answers.length)]}`)
-            .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
-            })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        message.channel.send({embeds: [embed]});
+        if (!args.join(' '))
+            return this.sendErrorMessage(
+                message,
+                0,
+                'Please provide a question to ask'
+            );
+        this.handle(message, args.join(' '));
+    }
+
+    interact(interaction) {
+        this.handle(interaction, interaction.options.getString('question'), true);
+    }
+
+    async handle(context, question) {
+        const payload = {
+            embeds: [
+                new EmbedBuilder()
+                    .setTitle('🎱  The Magic 8-Ball  🎱')
+                    .addFields([{name: 'Question', value:  question}])
+                    .addFields([{name: 'Answer', value: `${answers[Math.floor(Math.random() * answers.length)]}`}])
+                    .setFooter({
+                        text: this.getUserIdentifier(context.author),
+                        iconURL: this.getAvatarURL(context.author),
+                    })
+                    .setTimestamp()
+            ]
+        };
+
+        await this.sendReply(context, payload);
     }
 };

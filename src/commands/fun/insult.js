@@ -1,37 +1,60 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const fetch = require('node-fetch');
+const {SlashCommandBuilder} = require('discord.js');
+const {fail} = require('../../utils/emojis.json');
 
 module.exports = class insultCommand extends Command {
     constructor(client) {
         super(client, {
-            name: 'insult',
-            aliases: ['roast'],
-            usage: 'insult',
-            description: 'Insult/roast someone',
+            name: 'roast',
+            aliases: ['insult'],
+            usage: 'roast',
+            description: 'Roast someone',
             type: client.types.FUN,
-            examples: ['insult @split']
+            examples: ['roast @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption((u) => u.setName('user').setRequired(false).setDescription('The user to insult/roast')),
         });
     }
 
     async run(message, args) {
-        const member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0]) || message.author;
+        const member = (await this.getGuildMember(message.guild, args.join(' '))) || message.author;
+        await this.handle(member, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || interaction.author;
+        await this.handle(member, interaction, true);
+    }
+
+    async handle(targetUser, context) {
         try {
-            const res = await fetch('https://evilinsult.com/generate_insult.php?lang=en&type=json');
+            const res = await fetch(
+                'https://evilinsult.com/generate_insult.php?lang=en&type=json'
+            );
             const insult = (await res.json()).insult;
 
-            const embed = new MessageEmbed()
-                .setDescription(`<@${member.id}>, ${insult}`)
+            const embed = new EmbedBuilder()
+                .setDescription(`<@${targetUser.id}>, ${insult}`)
                 .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text: this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author),
                 })
-                .setTimestamp()
-                .setColor(message.guild.me.displayHexColor);
-            message.channel.send({embeds: [embed]});
-        } catch (err) {
-            message.client.logger.error(err.stack);
-            this.sendErrorMessage(message, 1, 'Please try again in a few seconds', err.message);
+                .setTimestamp();
+
+            const payload = {
+                embeds: [embed],
+            }; await this.sendReply(context, payload);
+        }
+        catch (err) {
+            const embed = new EmbedBuilder()
+                .setTitle('Error')
+                .setDescription(fail + ' ' + err.message)
+                .setColor('Red');
+            const payload = {
+                embeds: [embed],
+            }; await this.sendReply(context, payload);
         }
     }
 };

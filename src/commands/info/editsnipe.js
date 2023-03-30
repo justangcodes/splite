@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
-const {fail} = require('../../utils/emojis.json')
+const {EmbedBuilder} = require('discord.js');
+const {fail} = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 module.exports = class SnipeCommand extends Command {
     constructor(client) {
         super(client, {
@@ -8,41 +9,63 @@ module.exports = class SnipeCommand extends Command {
             usage: 'editsnipe',
             aliases: ['es', 'esn', 'esniper'],
             description: 'Shows the most recently edited message in the channel',
-            type: client.types.INFO
+            type: client.types.INFO,
+            slashCommand: new SlashCommandBuilder()
         });
     }
 
-    async run(message, args) {
-        const embed = new MessageEmbed()
-            .setDescription('`Sniping...`')
-            .setColor("RANDOM");
-        const msg = await message.channel.send({embeds: [embed]});
+    run(message) {
+        this.handle(message, false);
+    }
 
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
 
-        const snipedMSg = message.guild.editSnipes.get(message.channel.id)
-        if (snipedMSg && snipedMSg.newMessage && (snipedMSg.oldMessage.content)) {
-            embed.setDescription(`${snipedMSg.newMessage.author} edited [message](https://discord.com/channels/${message.guild.id}/${message.channel.id}/${snipedMSg.newMessage.id})`)
-                .addField('Before', snipedMSg.oldMessage.content || '')
-                .addField('After', snipedMSg.newMessage.content || '')
+    handle(context) {
+
+        const snipedMSg = context.guild.editSnipes.get(context.channel.id);
+
+        if (snipedMSg && snipedMSg.newMessage && snipedMSg.oldMessage.content) {
+            const embed = new EmbedBuilder()
+                .setDescription(
+                    `${snipedMSg.newMessage.author} edited [message](https://discord.com/channels/${context.guild.id}/${context.channel.id}/${snipedMSg.newMessage.id})`
+                )
+                .addFields([{name: 'Before', value:  snipedMSg.oldMessage.content || ''}])
+                .addFields([{name: 'After', value:  snipedMSg.newMessage.content || ''}])
                 .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text: this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author),
                 })
-                .setImage(`${snipedMSg.newMessage.attachments.size > 0 ? snipedMSg.attachments.first().url : ''}`)
+                .setImage(
+                    `${
+                        snipedMSg.newMessage.attachments.size > 0
+                            ? snipedMSg.attachments.first().url
+                            : ''
+                    }`
+                )
                 .setTimestamp()
-                .setAuthor(`${snipedMSg.newMessage.author.username}#${snipedMSg.newMessage.author.discriminator}`, `https://cdn.discordapp.com/avatars/${snipedMSg.newMessage.author.id}/${snipedMSg.newMessage.author.avatar}.png`)
-            msg.edit({embeds: [embed]});
-        } else {
-            embed.setTitle(`${message.client.name} Sniper`)
+                .setAuthor({
+                    name: `${snipedMSg.newMessage.author.username}#${snipedMSg.newMessage.author.discriminator}`,
+                    iconURL: `https://cdn.discordapp.com/avatars/${snipedMSg.newMessage.author.id}/${snipedMSg.newMessage.author.avatar}.png`,
+                });
+
+            const payload = {embeds: [embed]};
+            this.sendReply(context, payload);
+        }
+        else {
+            const embed = new EmbedBuilder()
+                .setTitle(`${this.client.name} Sniper`)
                 .setDescription(`${fail} There is nothing to snipe!`)
                 .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
+                    text: this.getUserIdentifier(context.author),
+                    iconURL: this.getAvatarURL(context.author),
                 })
                 .setTimestamp();
-            msg.edit({embeds: [embed]}).then(m => {
-                setTimeout(() => m.delete(), 5000);
-            });
+
+            const payload = {embeds: [embed]};
+            this.sendReply(context, payload);
         }
     }
 };

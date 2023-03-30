@@ -1,5 +1,5 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const emojis = require('../../utils/emojis.json');
 
 module.exports = class testWelcomeCommand extends Command {
@@ -10,43 +10,66 @@ module.exports = class testWelcomeCommand extends Command {
             usage: 'testwelcome',
             description: 'Sends a test welcome message.',
             type: client.types.MOD,
-            clientPermissions: ['SEND_MESSAGES', 'EMBED_LINKS'],
-            userPermissions: ['KICK_MEMBERS'],
-            examples: ['testwelcome']
+            clientPermissions: ['SendMessages', 'EmbedLinks'],
+            userPermissions: ['KickMembers'],
+            examples: ['testwelcome'],
         });
     }
 
-    run(message, args) {
-        // Get welcome channel
-        let {welcome_channel_id: welcomeChannelId, welcome_message: welcomeMessage} =
-            message.client.db.settings.selectWelcomes.get(message.guild.id);
-        const welcomeChannel = message.guild.channels.cache.get(welcomeChannelId);
+    run(message) {
+        this.handle(message);
+    }
 
-        // Send welcome message
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction);
+    }
+
+    handle(context) {
+        let {
+            welcome_channel_id: welcomeChannelId,
+            welcome_message: welcomeMessage,
+        } = this.client.db.settings.selectWelcomes.get(context.guild.id);
+        const welcomeChannel = context.guild.channels.cache.get(welcomeChannelId);
+
         if (
             welcomeChannel &&
             welcomeChannel.viewable &&
-            welcomeChannel.permissionsFor(message.guild.me).has(['SEND_MESSAGES', 'EMBED_LINKS']) &&
+            welcomeChannel
+                .permissionsFor(context.guild.members.me)
+                .has(['SendMessages', 'EmbedLinks']) &&
             welcomeMessage
         ) {
             welcomeMessage = welcomeMessage
-                .replace(/`?\?member`?/g, message.member) // Member mention substitution
-                .replace(/`?\?username`?/g, message.member.user.username) // Username substitution
-                .replace(/`?\?tag`?/g, message.member.user.tag) // Tag substitution
-                .replace(/`?\?size`?/g, message.guild.members.cache.size); // Guild size substitution
-            welcomeChannel.send({embeds: [new MessageEmbed().setDescription(welcomeMessage).setColor("RANDOM")]});
-        } else {
-            message.channel.send({
-                embeds: [new MessageEmbed()
-                    .setDescription(`${emojis.fail} There is no welcome message set for this server.\n\n\`setwelcomemessage\` Sets a welcome message\n\`setwelcomechannel\` Sets the channel to post the welcome message to. `)
-                    .setColor("RED")
-                    .setFooter({
-                        text: message.member.displayName,
-                        iconURL: message.author.displayAvatarURL({dynamic: true})
-                    })
-                    .setTimestamp()
-                ]
-            })
+                .replace(/`?\?member`?/g, context.member) // Member mention substitution
+                .replace(/`?\?username`?/g, context.member.user.username) // Username substitution
+                .replace(/`?\?tag`?/g, context.member.user.tag) // Tag substitution
+                .replace(/`?\?size`?/g, context.guild.memberCount); // Guild size substitution
+            welcomeChannel.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(welcomeMessage)
+                ],
+            });
+        }
+        else {
+            const payload = {
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `${emojis.fail} There is no welcome message set for this server.\n\n\`setwelcomemessage\` Sets a welcome context\n\`setwelcomechannel\` Sets the channel to post the welcome message to. `
+                        )
+                        .setColor('Red')
+                        .setFooter({
+                            text: context.member.displayName,
+                            iconURL: context.author.displayAvatarURL({
+                                dynamic: true,
+                            }),
+                        })
+                        .setTimestamp(),
+                ],
+            };
+            this.sendReply(context, payload);
         }
     }
 };

@@ -1,6 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {oneLine} = require('common-tags');
+const {SlashCommandBuilder} = require('discord.js');
 
 module.exports = class InviteMeCommand extends Command {
     constructor(client) {
@@ -9,28 +10,46 @@ module.exports = class InviteMeCommand extends Command {
             aliases: ['invite', 'invme', 'im'],
             usage: 'inviteme',
             description: `Generates a link you can use to invite ${client.name} to your own server.`,
-            type: client.types.INFO
+            type: client.types.INFO,
+            slashCommand: new SlashCommandBuilder()
         });
     }
 
-    run(message, args) {
-        const embed = new MessageEmbed()
+    run(message) {
+        this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const embed = new EmbedBuilder()
             .setTitle('Invite Me')
-            .setThumbnail(`${message.client.config.botLogoURL || 'https://i.imgur.com/B0XSinY.png'}`)
-            .setDescription(oneLine`
-        Click [here](${message.client.link})
+            .setThumbnail(
+                `${
+                    this.client.config.botLogoURL ||
+                    'https://i.imgur.com/B0XSinY.png'
+                }`
+            )
+            .setDescription(
+                oneLine`
+        Click [here](https://discord.com/api/oauth2/authorize?client_id=${this.client.user.id}&permissions=8&scope=bot%20applications.commands)
         to invite me to your server!
-      `)
-            .addField('Developed By',
-                `**${message.client.ownerTag}**`
+      `
             )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: this.getUserIdentifier(context.author),
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
-        if (message.client.config.botLogoURL)
-            message.channel.send({embeds: [embed]});
+            .setTimestamp();
+
+        if (this.client.owners.length > 0) {
+            embed.addFields([{name: 'Developed By', value:  `<@${this.client.owners[0]}>`, inline:  true}]);
+        }
+
+        const payload = {embeds: [embed]};
+        this.sendReply(context, payload);
     }
 };

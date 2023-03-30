@@ -1,7 +1,7 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const {success} = require('../../utils/emojis.json');
-const {oneLine, stripIndent} = require('common-tags');
+const {oneLine} = require('common-tags');
 
 module.exports = class clearStarboardChannelCommand extends Command {
     constructor(client) {
@@ -13,28 +13,52 @@ module.exports = class clearStarboardChannelCommand extends Command {
         clears the starboard text channel for your server.
       `,
             type: client.types.ADMIN,
-            userPermissions: ['MANAGE_GUILD'],
-            examples: ['clearstarboardchannel']
+            userPermissions: ['ManageGuild'],
+            examples: ['clearstarboardchannel'],
         });
     }
 
-    run(message, args) {
-        const starboardChannelId = message.client.db.settings.selectStarboardChannelId.pluck().get(message.guild.id);
-        const oldStarboardChannel = message.guild.channels.cache.get(starboardChannelId) || '`None`';
-        const embed = new MessageEmbed()
+    run(message) {
+        this.handle(message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        this.handle(interaction, true);
+    }
+
+    handle(context) {
+        const starboardChannelId =
+            this.client.db.settings.selectStarboardChannelId
+                .pluck()
+                .get(context.guild.id);
+        const oldStarboardChannel =
+            context.guild.channels.cache.get(starboardChannelId) || '`None`';
+        const embed = new EmbedBuilder()
             .setTitle('Settings: `Starboard`')
-            .setThumbnail(message.guild.iconURL({dynamic: true}))
-            .setDescription(`The \`starboard channel\` was successfully cleared. ${success}`)
+            .setThumbnail(context.guild.iconURL({dynamic: true}))
+            .setDescription(
+                `The \`starboard channel\` was successfully cleared. ${success}`
+            )
             .setFooter({
-                text: message.member.displayName,
-                iconURL: message.author.displayAvatarURL()
+                text: context.member.displayName,
+                iconURL: this.getAvatarURL(context.author),
             })
-            .setTimestamp()
-            .setColor(message.guild.me.displayHexColor);
+            .setTimestamp();
 
         // Clear if no args provided
-        message.client.db.settings.updateStarboardChannelId.run(null, message.guild.id);
-        return message.channel.send({embeds: [embed.addField('Starboard Channel', `${oldStarboardChannel} ➔ \`None\``)]});
+        this.client.db.settings.updateStarboardChannelId.run(
+            null,
+            context.guild.id
+        );
 
+        const payload = {
+            embeds: [embed.addFields({
+                name: 'Starboard Channel',
+                value: `${oldStarboardChannel} ➔ \`None\``
+            })],
+        };
+
+        this.sendReply(context, payload);
     }
 };

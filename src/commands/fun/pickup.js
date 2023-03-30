@@ -1,7 +1,9 @@
 const Command = require('../Command.js');
-const {MessageEmbed} = require('discord.js');
+const {EmbedBuilder} = require('discord.js');
 const fetch = require('node-fetch');
-const jsdom = require("jsdom");
+const jsdom = require('jsdom');
+const {fail} = require('../../utils/emojis.json');
+const {SlashCommandBuilder} = require('discord.js');
 const {JSDOM} = jsdom;
 
 module.exports = class pickupCommand extends Command {
@@ -9,34 +11,58 @@ module.exports = class pickupCommand extends Command {
         super(client, {
             name: 'pickup',
             usage: 'pickup',
+            aliases: ['compliment'],
             description: 'Create a pickup line and send it to someone',
             type: client.types.FUN,
-            examples: ['pickup @split']
+            examples: ['pickup @split'],
+            slashCommand: new SlashCommandBuilder().addUserOption((u) => u.setName('user').setRequired(false).setDescription('The user to compliment')),
         });
     }
 
     async run(message, args) {
-        const member = await this.getMemberFromMention(message, args[0]) || await message.guild.members.cache.get(args[0]) || message.author;
+        const member = (await this.getGuildMember(message.guild, args.join(' '))) || message.author;
+        await this.handle(member, message, false);
+    }
+
+    async interact(interaction) {
+        await interaction.deferReply();
+        const member = interaction.options.getUser('user') || interaction.author;
+        await this.handle(member, interaction, true);
+    }
+
+    async handle(targetUser, context) {
         try {
             const res = await fetch('http://www.pickuplinegen.com/');
-            const pickup = (await res.text())
-            const dom = new JSDOM(pickup)
-            let line = dom.window.document.getElementById('content').textContent
-            line = line.trim()
+            const pickup = await res.text();
+            const dom = new JSDOM(pickup);
+            let line = dom.window.document.getElementById('content').textContent;
+            line = line.trim();
 
-            const embed = new MessageEmbed()
-                .setAuthor(`Pickup lines used at your own risk`, this.getAvatarURL(member))
-                .setDescription(`<@${member.id}>,|| ${line} ||`)
-                .setFooter({
-                    text: message.member.displayName,
-                    iconURL: message.author.displayAvatarURL()
-                })
-                .setTimestamp()
-                .setColor(message.guild.me.displayHexColor);
-            message.channel.send({embeds: [embed]});
-        } catch (err) {
-            message.client.logger.error(err.stack);
-            this.sendErrorMessage(message, 1, 'Please try again in a few seconds', err.message);
+            const payload = {
+                embeds: [new EmbedBuilder()
+                    .setAuthor({
+                        name: 'Pickup lines used at your own risk',
+                        iconURL: this.getAvatarURL(context.author),
+                    })
+                    .setDescription(`<@${targetUser.id}>,|| ${line} ||`)
+                    .setFooter({
+                        text: this.getUserIdentifier(context.author),
+                        iconURL: this.getAvatarURL(context.author),
+                    })],
+            };
+
+            await this.sendReply(context, payload);
         }
+        catch (err) {
+            const payload = {
+                embeds: [new EmbedBuilder()
+                    .setTitle('Error')
+                    .setDescription(fail + ' ' + err.message)
+                    .setColor('Red')]
+            };
+
+            await this.sendReply(context, payload);
+        }
+
     }
 };

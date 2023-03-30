@@ -1,23 +1,22 @@
 const Discord = require('discord.js');
-const {REST} = require('@discordjs/rest');
-const {Routes} = require('discord-api-types/v9');
 const {readdir, readdirSync} = require('fs');
 const {join, resolve} = require('path');
 const AsciiTable = require('ascii-table');
-const {fail} = require('./utils/emojis.json');
-const amethyste = require('amethyste-api')
-const {Collection} = require("discord.js");
-const {NekoBot} = require("nekobot-api");
+const {fail, online} = require('./utils/emojis.json');
+const amethyste = require('amethyste-api');
+const {Collection, ChannelType} = require('discord.js');
+const {NekoBot} = require('nekobot-api');
 const {Player} = require('discord-player');
+const intents = require('../intents.js');
+const {Configuration, OpenAIApi} = require('openai');
+const moment = require('moment');
 
 class Client extends Discord.Client {
     constructor(config, options) {
-        super(options);
-
-        this.name = config.botName;
+        super({...options, intents: intents,});
+        this.intents = intents;
         this.config = config;
-        this.link = config.inviteLink;
-        this.ownerTag = config.ownerDiscordTag;
+        this.name = config.botName;
         this.logger = require('./utils/logger.js');
         this.db = require('./utils/db.js');
         this.types = {
@@ -30,34 +29,35 @@ class Client extends Discord.Client {
             MOD: 'mod',
             MUSIC: 'music',
             ADMIN: 'admin',
+            MANAGER: 'manager',
             OWNER: 'owner',
         };
         this.commands = new Discord.Collection();
         this.aliases = new Discord.Collection();
-        this.topics = [];
-        this.token = config.token;
-        this.apiKeys = config.apiKeys;
-        this.ameApi = new amethyste(config.apiKeys.amethyste)
-        this.nekoApi = new NekoBot()
-        this.ownerId = config.ownerId;
-        this.extraOwnerIds = config.extraOwnerIds
-        this.bugReportChannelId = config.bugReportChannelId;
-        this.feedbackChannelId = config.feedbackChannelId;
-        this.serverLogId = config.serverLogId;
-        this.confessionReportsID = config.confessionReportsID
+        this.topics = {};
+        this.ameApi = config?.apiKeys?.amethyste ? new amethyste(config.apiKeys.amethyste) : null;
+        this.nekoApi = new NekoBot();
+        this.supportServerId = config.supportServerId;
         this.utils = require('./utils/utils.js');
         this.logger.info('Initializing...');
         this.odds = new Map();
         this.votes = new Map();
         this.slashCommands = new Collection();
+        this.owners = [];
+        this.managers = [];
 
         //Create a new music player instance
         this.player = new Player(this, {
             ytdlOptions: {
-                quality: 'highestaudio',
-                highWaterMark: 1 << 25
+                quality: 'highestaudio', highWaterMark: 1 << 25
             }
-        })
+        });
+
+        if (config.apiKeys?.openAI?.apiKey) {
+            this.openai = new OpenAIApi(new Configuration({
+                apiKey: config.apiKeys.openAI.apiKey,
+            }));
+        }
     }
 
     /**
@@ -84,16 +84,18 @@ class Client extends Discord.Client {
     /**
      * Loads all available geoGuessr topics
      * @param {string} path
+     * @param type - The type of topic to load
      */
-    loadTopics(path) {
+    loadTopics(path, type) {
         readdir(path, (err, files) => {
             if (err) this.logger.error(err);
-            files = files.filter(f => f.split('.').pop() === 'yml');
+            files = files.filter(f => f.split('.').pop() === 'yaml');
             if (files.length === 0) return this.logger.warn('No topics found');
             this.logger.info(`${files.length} topic(s) found...`);
+            this.topics[type] = [];
             files.forEach(f => {
                 const topic = f.substring(0, f.indexOf('.'));
-                this.topics.push(topic);
+                this.topics[type].push(topic);
                 this.logger.info(`Loading topic: ${topic}`);
             });
         });
@@ -105,7 +107,16 @@ class Client extends Discord.Client {
      * @param {User} user
      */
     isOwner(user) {
-        return user.id === this.ownerId || this.extraOwnerIds?.includes(user.id)
+        return this.config.owners.includes(user.id);
+    }
+
+    /**
+     * Checks if user is a bot manager
+     * @param user
+     * @return {*}
+     */
+    isManager(user) {
+        return this.config.managers.includes(user.id) || this.isOwner(user);
     }
 
     /**
@@ -121,18 +132,37 @@ class Client extends Discord.Client {
         const systemChannel = guild.channels.cache.get(systemChannelId);
 
         if ( // Check channel and permissions
-            !systemChannel ||
-            !systemChannel.viewable ||
-            !systemChannel.permissionsFor(guild.me).has(['SEND_MESSAGES', 'EMBED_LINKS'])
-        ) return;
+            !systemChannel || !systemChannel.viewable || !systemChannel.permissionsFor(guild.members.me).has(['SendMessages', 'EmbedLinks'])) return;
 
-        const embed = new Discord.MessageEmbed()
-            .setAuthor(`${this.user.tag}`, this.user.displayAvatarURL({dynamic: true}))
+        const embed = new Discord.EmbedBuilder()
+            .setAuthor({
+                name: `${this.user.tag}`, iconURL: this.getAvatarURL(this.user)
+            })
             .setTitle(`${fail} System Error: \`${error}\``)
             .setDescription(`\`\`\`diff\n- System Failure\n+ ${errorMessage}\`\`\``)
-            .setTimestamp()
-            .setColor("RANDOM");
+            .setTimestamp();
         systemChannel.send({embeds: [embed]});
+    }
+
+    removeAFK(member, guild, channel) {
+        let afkStatus = this.db.users.selectAfk.get(guild.id, member.id);
+
+        if (afkStatus?.afk != null) {
+            const d = new Date(afkStatus.afk_time);
+            this.db.users.updateAfk.run(null, 0, member.id, guild.id);
+
+            if (member.nickname) {
+                member.setNickname(`${member.nickname.replace('[AFK]', '')}`)
+                    .catch(() => {
+                        console.log('There was an error while trying to remove the AFK tag from the nickname: ' + member.tag);
+                    });
+            }
+            channel
+                .send(`${online} Welcome back ${member}, you went afk **${moment(d).fromNow()}**!`)
+                .then((msg) => {
+                    setTimeout(() => msg.delete(), 5000);
+                });
+        }
     }
 
 
@@ -145,109 +175,56 @@ class Client extends Discord.Client {
         let table = new AsciiTable('Commands');
         table.setHeading('File', 'Aliases', 'Type', 'Status');
 
+        // sort it so that files with the word "group" are loaded at the end
+        const groups = [];
+
         readdirSync(path).filter(f => !f.endsWith('.js')).forEach(dir => {
             const commands = readdirSync(resolve(__basedir, join(path, dir))).filter(file => file.endsWith('js'));
-
             commands.forEach(f => {
-                const Command = require(resolve(__basedir, join(path, dir, f)));
-                const command = new Command(this); // Instantiate the specific command
-                if (command.name && !command.disabled) {
-                    // Map command
-                    this.commands.set(command.name, command);
-
-                    // Map command aliases
-                    let aliases = '';
-                    if (command.aliases) {
-                        command.aliases.forEach(alias => {
-                            this.aliases.set(alias, command);
-                        });
-                        aliases = command.aliases.join(', ');
-                    }
-
-
-
-                    table.addRow(f, aliases, command.type, 'pass');
-                } else {
-                    this.logger.warn(`${f} failed to load`);
-                    table.addRow(f, '', '', 'fail');
-                }
+                if (f.toLowerCase().includes('group')) groups.push(resolve(__basedir, join(path, dir, f)));
+                else this.tryLoadCommand(resolve(__basedir, join(path, dir, f)), table);
             });
         });
+
+        groups.forEach(f => {
+            this.tryLoadCommand(f, table);
+        });
+
         this.logger.info(`\n${table.toString()}`);
         return this;
     }
 
-    //
-    // /**
-    //  * Loads all available slash commands
-    //  * @param path
-    //  */
-    // loadSlashCommands(path) {
-    //     this.logger.info(`Loading Slash Commands`)
-    //     const table = new AsciiTable('Slash Commands').setHeading('Name', 'Type', 'Status');
-    //
-    //     const folders = readdirSync(path).filter(file => !file.endsWith('.js'))
-    //
-    //     folders.forEach(folder => {
-    //         this.logger.info(`Folder: ${folder}`)
-    //         const commands = readdirSync(resolve(__basedir, join(path, folder))).filter(f => f.endsWith('.js'))
-    //         commands.forEach(f => {
-    //             const Command = require(resolve(__basedir, join(path, folder, f)));
-    //             const slashCommand = new Command(this);
-    //
-    //             if (slashCommand.name && !slashCommand.disabled && slashCommand) {
-    //                 this.slashCommands.set(slashCommand.name, slashCommand);
-    //                 table.addRow(f, slashCommand.type, 'Pass');
-    //                 this.logger.info(`Loaded Slash Command: ${f} | ${slashCommand.description} | Type: ${slashCommand.type}`)
-    //             } else {
-    //                 table.addRow(f, '', 'Fail');
-    //                 this.logger.error(`Failed Loading Command: ${f}`)
-    //             }
-    //         })
-    //     })
-    //     this.logger.info(table.toString())
-    // }
+    tryLoadCommand(filepath, table) {
+        const Command = require(filepath);
+        const command = new Command(this);
 
-    /**
-     * Registers all slash commands across all the guilds
-     * @param id client id
-     * @returns {Promise<void>}
-     */
-    async registerAllSlashCommands(id) {
-        this.logger.info('Started refreshing application (/) commands.');
-        const data = this.commands.filter(c => c.slashCommand && c.disabled !== true).map(c => c.slashCommand.toJSON())
-        const promises = [];
-        this.guilds.cache.forEach(g => {
-            promises.push(this.registerSlashCommands(g, data, id))
-        })
-        Promise.all(promises).then(() => {
-            this.logger.info('Finished refreshing application (/) commands.');
-        }).catch((error) => {
-            const guild = error.url.toString().match(/(guilds\/)(\S*)(\/commands)/)[2]
-            if (error.code === 50001) return this.logger.error(`Failed to setup slash commands for guild: ${guild}. Missing perms.`)
-        })
-    }
+        const filename = filepath.split('/').pop().split('\\').pop();
+        if (filename.toLowerCase().includes('group') && !command.name.toLowerCase().includes('group')) {
+            this.logger.error(`Command Group files must have the word "group" in their filename and command name: ${filename}`);
+            this.logger.error(`Make sure the command file ${filename} has the word "group" in its name property`);
+            process.exit(1);
+        }
 
-    /**
-     * Registes all slash commands in the provided guild
-     * @param guild guild to register commands in
-     * @param commands array of commands
-     * @param id client id
-     * @returns {Promise<unknown>}
-     */
-    registerSlashCommands(guild, commands, id) {
-        return new Promise((async (resolve, reject) => {
-            const rest = new REST({version: '9'}).setToken(this.token);
-            try {
-                await rest.put(
-                    Routes.applicationGuildCommands(id, guild.id),
-                    {body: commands},
-                );
-                resolve('Registered slash commands for ' + guild.name);
-            } catch (error) {
-                reject(error);
+        if (command.name && !command.disabled) {
+            // Map command
+            this.commands.set(command.name, command);
+
+            // Map command aliases
+            let aliases = '';
+            if (command.aliases) {
+                command.aliases.forEach(alias => {
+                    this.aliases.set(alias, command);
+                });
+                aliases = command.aliases.join(', ');
             }
-        }))
+
+
+            table.addRow(filename, aliases, command.type, 'pass');
+        }
+        else {
+            this.logger.warn(`${filename} failed to load`);
+            table.addRow(filename, '', '', 'fail');
+        }
     }
 
     /**
@@ -255,15 +232,14 @@ class Client extends Discord.Client {
      */
     handleMusicEvents() {
         this.player.on('error', (queue, error) => {
-            console.log(`Error emitted from the queue ${error.message}`);
+            this.logger.error(`Error emitted from the queue ${error.message}`);
         });
 
         this.player.on('connectionError', (queue, error) => {
-            console.log(`Error emitted from the connection ${error.message}`);
+            this.logger.error(`Error emitted from the connection ${error.message}`);
         });
 
         this.player.on('trackStart', (queue, track) => {
-            if (!this.config.music.loopMessage && queue.repeatMode !== 0) return;
             queue.metadata.send(`Started playing ${track.title} in **${queue.connection.channel.name}** 🎧`);
         });
 
@@ -278,6 +254,148 @@ class Client extends Discord.Client {
         this.player.on('channelEmpty', (queue) => {
             queue.metadata.send('Nobody is in the voice channel, leaving the voice channel... ❌');
         });
+    }
+
+    /**
+     * Loads the Guild from the client to the database
+     * @param guild The guild to load
+     * @param prune if true, checks for members that are not in the guild and removes them, and checks for members that are not in the database and adds them
+     * @param createSettings if true, creates the settings for the guild, otherwise it will just load the settings
+     */
+    async loadGuild(guild, prune = true, createSettings = false) {
+        let {modLog, adminRole, modRole, muteRole, crownRole} = await this.extractSettings(guild, createSettings);
+
+        /** ------------------------------------------------------------------------------------------------
+         * UPDATE TABLES
+         * ------------------------------------------------------------------------------------------------ */
+        // Update settings table
+        this.db.settings.insertRow.run(guild.id, guild.name, guild.systemChannelID, // Default channel
+            null, //confessions_channel_id
+            guild.systemChannelID, // Welcome channel
+            guild.systemChannelID, // Farewell channel
+            guild.systemChannelID,  // Crown Channel
+            modLog ? modLog.id : null, adminRole ? adminRole.id : null, modRole ? modRole.id : null, muteRole ? muteRole.id : null, crownRole ? crownRole.id : null, null, //joinvoting_message_id
+            null,  //joinvoting_emoji
+            null,  //voting_channel_id
+            0,     //anonymous
+            null      //view_confessions_role
+        );
+        /** ------------------------------------------------------------------------------------------------
+         * Force Cache all members
+         * ------------------------------------------------------------------------------------------------ */
+        guild.members.fetch().then(async members => {
+            const toBeInserted = members.map(member => {
+                // Update bios table
+                this.db.bios.insertRow.run(member.id, null);
+                return {
+                    user_id: member.id,
+                    user_name: member.user.username,
+                    user_discriminator: member.user.discriminator,
+                    guild_id: guild.id,
+                    guild_name: guild.name,
+                    date_joined: member.joinedAt.toString(),
+                    bot: member.user.bot ? 1 : 0,
+                    afk: null, //AFK
+                    afk_time: 0,
+                    optOutSmashOrPass: 0
+                };
+            });
+
+            // break up into chunks of 100 members using splice
+            const chunks = [];
+            while (toBeInserted.length > 0) {
+                chunks.push(toBeInserted.splice(0, 100));
+            }
+
+            chunks.forEach(chunk => {
+                this.db.users.insertBatch(chunk);
+            });
+
+            if (prune) {
+                const guildMembers = await guild.members.fetch();
+                /** ------------------------------------------------------------------------------------------------
+                 * CHECK DATABASE
+                 * ------------------------------------------------------------------------------------------------ */
+                // If member left the guild, set their status to left
+                const currentMemberIds = this.db.users.selectCurrentMembers.all(guild.id).map(row => row.user_id);
+                for (const id of currentMemberIds) {
+                    if (!guildMembers.has(id)) {
+                        this.db.users.updateCurrentMember.run(0, id, guild.id);
+                        this.db.users.wipeTotalPoints.run(id, guild.id);
+                    }
+                }
+
+                // If member joined the guild, add to database
+                const missingMemberIds = this.db.users.selectMissingMembers.all(guild.id).map(row => row.user_id);
+                for (const id of missingMemberIds) {
+                    if (guildMembers.has(id)) this.db.users.updateCurrentMember.run(1, id, guild.id);
+                }
+            }
+        });
+
+        // Set Nickname to include prefix
+        // await (await guild.members.fetch(this.user.id)).setNickname(`[${this.db.settings.selectPrefix.pluck().get(guild.id)}] ${this.name}`);
+    }
+
+    async extractSettings(guild, createSettings) {
+        /** ------------------------------------------------------------------------------------------------
+         * FIND SETTINGS
+         * ------------------------------------------------------------------------------------------------ */
+        // Find mod log
+        const modLog = guild.channels.cache.find(c => c.name.replace('-', '').replace('s', '') === 'modlog' || c.name.replace('-', '').replace('s', '') === 'moderatorlog');
+
+        // Find admin and mod roles
+        const adminRole = guild.roles.cache.find(r => r.name.toLowerCase() === 'admin' || r.name.toLowerCase() === 'administrator');
+        const modRole = guild.roles.cache.find(r => r.name.toLowerCase() === 'mod' || r.name.toLowerCase() === 'moderator');
+        let muteRole = guild.roles.cache.find(r => r.name.toLowerCase() === 'muted');
+        if (createSettings && !muteRole) {
+            try {
+                muteRole = await guild.roles.create({
+                    name: 'Muted', permissions: []
+                });
+            }
+            catch (err) {
+                this.logger.error(err.message);
+            }
+
+            for (const channel of guild.channels.cache.values()) {
+                try {
+                    if (channel.viewable && channel.permissionsFor(guild.members.me).has('ManageRoles')) {
+                        if (channel.type === ChannelType.GuildText) // Deny permissions in text channels
+                            await channel.permissionOverwrites.edit(muteRole, {
+                                'SendMessages': false, 'AddReactions': false
+                            }); else if (channel.type === ChannelType.GuildVoice && channel.manageable) // Deny permissions in voice channels
+                            await channel.permissionOverwrites.edit(muteRole, {
+                                'Speak': false, 'Stream': false
+                            });
+                    }
+                }
+                catch (err) {
+                    this.logger.error(err.stack);
+                }
+            }
+        }
+        // Create crown role
+        let crownRole = guild.roles.cache.find(r => r.name === 'The Crown');
+        if (createSettings && !crownRole) {
+            try {
+                crownRole = await guild.roles.create({
+                    name: 'The Crown', permissions: [], hoist: true
+                });
+            }
+            catch (err) {
+                this.logger.error(err.message);
+            }
+        }
+        return {modLog, adminRole, modRole, muteRole, crownRole};
+    }
+
+    getOwnerFromId(id) {
+        return this.owners?.includes(id);
+    }
+
+    getManagerFromId(id) {
+        return this.managers?.includes(id);
     }
 }
 
